@@ -262,7 +262,7 @@ scaled_licordata_2019 <- left_join(licordata2019_cleaned, morph2019, by = "final
 #######################################################
 ### 2020:
 #######################################################
-# Direct Google Drive link to "FoRTE/data/subcanopy_leaf_physiology/2018"
+# Direct Google Drive link to "FoRTE/data/subcanopy_leaf_physiology/2020"
 as_id("https://drive.google.com/drive/u/1/folders/1qUe1SwSO7v6scWOIUYghyOTOKebAbrWM") %>% 
   drive_ls ->
   gdfiles
@@ -335,7 +335,7 @@ print(unique(dates))
 tibble::view(licordata2020)
 
 # now, exclude them. First two files had accidental 6th measurement taken, last one I logged way too early on first log and got a negative value
-drop <- c(1150, 1406, 1847)
+drop <- c(1150, 1401, 1842)
 
 licordata2020_cleaned <- licordata2020[-drop, ]
 
@@ -367,7 +367,8 @@ licordata2020_cleaned <- licordata2020_cleaned %>%
 
 # join to leaf area data for scaling pine samples
 # bring in morphology data from 2020
-morph2020 <- read.csv("data/leaf_morphology/FoRTE_subcanopy_leaf_morphology_2020.csv")
+morph2020 <- read.csv("data/leaf_morphology/FoRTE_subcanopy_leaf_morphology_2020.csv") %>%
+  as_tibble()
 
 morph2020 <- morph2020 %>%
   mutate(final_ID = as.numeric(tag_number)) %>%
