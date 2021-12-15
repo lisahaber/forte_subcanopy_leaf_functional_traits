@@ -18,6 +18,8 @@ library(lubridate)
 
 #### I. Download successive years' data into data directories (only need to do this once)
 
+###########NOTE: 12/6/2021 ALL data drives have changed location in migration of Google Drive to a university maintained share drive. Need to updat all links before running those download scripts again.
+
 ##################################################
 ### 2018:
 ##################################################
