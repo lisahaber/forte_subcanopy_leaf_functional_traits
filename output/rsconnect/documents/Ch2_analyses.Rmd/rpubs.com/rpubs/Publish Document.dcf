@@ -1,0 +1,10 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/863652/7447f19bae584317a8c3c1d0836c3a3c
+bundleId: https://api.rpubs.com/api/v1/document/863652/7447f19bae584317a8c3c1d0836c3a3c
+url: http://rpubs.com/haberlt/863652
+when: 1648224991.03804

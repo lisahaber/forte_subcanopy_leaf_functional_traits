@@ -1,0 +1,1336 @@
+---
+title: "Chapter 2 Analyses"
+author: "Lisa Haber"
+date: "3/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Overview:
+This is a running presentation of results from Ch. 2 analysis.
+
+## Progress to date:
+O2.1: DONE.
+
+O2.2: DONE.
+
+O2.3:
+
+
+# Chapter 2 Objectives and Hypotheses: O2.1
+O2.1: Quantify the effect of disturbance severity (0, 45, 65, and 85 % gross defoliation) on subcanopy community-weighted means (CWM) of leaf traits (LMA, NDVIleaf, gs, Asat) across four landform types (i.e. replicates).
+
+H2.1: Increases in subcanopy CWMs associated with sun-leaf morphology and physiology over three growing seasons after disturbance will positively correlate with disturbance severity; this effect will be most pronounced in low productivity sites. 
+
+Analysis O2.1:
+In order to test hypothesized linkages between disturbance severity and CWMs of leaf traits, I will employ a series of statistical models. All statistical analysis will be conducted in R using package lme4 (Bates et al., 2015). First, this analysis must address the inherently hierarchical or nested nature of the data collected, including grouping of samples within geographically non-independent areas and repeated measurements through successive years of data collection. To address O2.1, I will use a time series split-plot mixed effects ANOVA similar in design to the published models used in analysis of first-year production response at our site (Gough et al., 2020; Grigri et al., 2020). In this model, disturbance severity (0, 45, 65, or 85 %) will be the fully randomized whole-plot factor, while disturbance treatment (“bottom-up” or “top-down” disturbance application, described in my dissertation proposal section 1.3, and randomized within each disturbance severity level) is the restrictively randomized split-plot factor (see proposal Fig. 1.2 for illustration of this design).This statistical model is detailed in Equation 2.1 and Table 2.2 below:
+
+Y_ijkl= μ + Rep_i + Year_j + Severity_(k|i) + Year:Sev_(jk|i) + Type_l + Year:Type_jl + ε_ijkl
+(2.1)
+
+Where Yijkl is the normally distributed subplot-level CWM subcanopy leaf functional trait, µ is the grand mean, Repi is experimental replicate (a random effect, analogous to an experimental block), Yearj is the sample year (j indexing the timeframe 2018-2021), Severityk|i is the disturbance severity (with each severity level, k, randomized within the ith replicate), Typel is the treatment type (l indexing one of the two types, top-down or bottom-up), two interaction terms for year:severity and year:type, and four separate error terms (three within-group error terms to deal with nested effects, plus a residual error term). For simplicity’s sake, all error terms are lumped in the notation in Equation 2.1 (as term ε), but are detailed in Table 2.2 as they will be separately analyzed in this model. To compare means across modeled groups, I will perform LSD post hoc pairwise tests with α = 0.05.  
+ 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+###### Load phys data, organize & get ready to run analyses
+## load required packages
+library(tidyverse)
+library(lubridate)
+library(car)
+library(agricolae)
+library(lme4)
+library(lmerTest) # this library will enable generation of p-values for effects, among other things
+library(ggeffects)
+library(sjPlot)
+library(MuMIn)
+
+## bring in the cleaned phys data
+d2018 <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/cleaned_data_for_analyses/LICOR_leaf_phys_2018.csv") %>%
+  as_tibble()
+d2019 <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/cleaned_data_for_analyses/LICOR_leaf_phys_2019.csv") %>%
+  as_tibble() 
+d2020 <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/cleaned_data_for_analyses/LICOR_leaf_phys_2020.csv") %>%
+  as_tibble()
+d2021 <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/cleaned_data_for_analyses/LICOR_leaf_phys_2021.csv") %>%
+  as_tibble()
+
+## get rid of negative Asat values and create means for individual leaves from 5 observations per leaf
+Asat2018 <- d2018 %>%
+  group_by(Filename) %>%
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
+  filter(MeanPhoto >= 0) ## note that 2018 has some negative values for MeanCond. These will need to be zero'ed out during scaling.
+
+# Filename column in 2019 data is a numeric vector rather than character, so need to convert
+## all dataframes from 2019, 2020, 2021 need to be cleaned of any trees that were girdled in early 2019
+d2019$Filename <- as.character(d2019$Filename)
+
+Asat2019 <- d2019 %>%
+  group_by(Filename) %>%
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
+  filter(MeanPhoto >= 0,
+         girdled. == "n")
+
+Asat2020 <- d2020 %>%
+  group_by(Filename) %>%
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
+  filter(MeanPhoto >= 0,
+         girdled. == "n")
+
+Asat2021 <- d2021 %>%
+  group_by(Filename) %>%
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
+  filter(MeanPhoto >= 0,
+         girdled. == "n")
+
+## bring in the FoRTE subplots treatment assignments
+library(readr)
+urlfile="https://raw.githubusercontent.com/lisahaber/fortedata/master/inst/extdata/fd_subplots.csv" #github link for raw fortedata file with treatment and severity assignments
+treatments <- read_csv(url(urlfile))
+require(tidyverse)
+
+treatments <- treatments %>%
+  mutate(Zero = "0")
+
+treatments <- treatments %>% 
+  unite(Subplot, c("replicate", "Zero", "plot", "subplot"), sep="")
+
+## merge all years' data
+alldata <- rbind(Asat2018, Asat2019, Asat2020, Asat2021)
+
+## now join to treatments data
+treatments1 <- treatments %>%
+  select(Subplot, disturbance_severity, treatment)
+
+df <- left_join(alldata, treatments1, by = "Subplot")
+df <- df %>%
+  mutate(Scaled_Asat = MeanPhoto*Asat_multiplier,
+         Scaled_Cond = MeanCond*Asat_multiplier)
+df1 <- df %>%
+  na.omit() %>%
+  filter(Scaled_Asat < 18) #This outlier filtering also appears to have removed impossibly high Scaled_Cond values; hooray!
+
+df1$Scaled_Cond[df1$Scaled_Cond < 0] <- 0 #setting all negative scaled conductivity values equal to zero.
+
+subplot_mean_phys <- df1 %>%
+  select(Cond, Filename, Species, Subplot, final_ID, Year, disturbance_severity, treatment, Asat_multiplier, Scaled_Asat, Scaled_Cond) %>%
+  group_by(Year, Subplot) %>%
+  summarize(Subplot_mean_Asat = mean(Scaled_Asat),
+            Subplot_mean_Cond = mean(Scaled_Cond))
+
+subplot_mean_phys <- left_join(subplot_mean_phys, treatments1, by = "Subplot")
+
+# add replicate to the dataset
+subplot_mean_phys$Replicate <-
+  ifelse(grepl("A...", subplot_mean_phys$Subplot),
+         "A",
+         ifelse(grepl("B...", subplot_mean_phys$Subplot),
+                "B",
+                ifelse(grepl("C...", subplot_mean_phys$Subplot),
+                       "C",
+                       ifelse(grepl("D...", subplot_mean_phys$Subplot),
+                              "D", "Other"
+                       ))))
+
+
+## making boxplots
+## make severity a factor!!!!
+subplot_mean_phys$disturbance_severity <- as.factor(subplot_mean_phys$disturbance_severity)
+
+bp1 <- subplot_mean_phys %>%
+  ggplot(aes(x = disturbance_severity, y = Subplot_mean_Asat, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM leaf photosynthetic rate (' *mu~ 'mol' ~CO[2]~ m^-2~s^-1*')') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) +
+  facet_grid(~Year)
+
+bp1 #subplot mean Asat, all years
+
+
+bp2 <- subplot_mean_phys %>%
+  ggplot(aes(x = disturbance_severity, y = Subplot_mean_Cond, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM leaf stomatal conductance (mol' ~CO[2]~ m^-2~s^-1*')') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp2 #subplot mean Asat, all years
+```
+
+## O2.1 Analysis Part 1: Leaf Asat & gs
+
+Running split-split plot ANOVA on Asat & gs data. Assumptions for ANOVA were tested for each data set. Asat data passed both normality and homegeneous variance tests, while gs data barely departed from normality (p = 0.04, Shapiro-Wilk test) but upheld homogeneity of variances assumption (with Levene's Test). Since ANOVA is known to be robust to departures from normality assumption, I assume this is ok. 
+
+### Results
+Asat model showed **significant year:severity interaction (p < 0.05)** and **significant main effect of year (p < 0.0001)**, with 85:2020, 65:2021 and 85:2021 being significantly different from control plots in those years (85% in 2020, and both 65% and 85% in 2021) according to LSD posthoc test. Cool stuff! 
+
+gs model again showed **significant main effect of year (p < 0.0001)**, with **a year:severity interaction having significance at alpha = 0.1 (p = 0.07)**. In 2021, the 45% severity group had significantly different mean stomatal conductance compared to control.
+
+
+```{r, echo=FALSE}
+#### ANOVA runs for Asat, gs
+### Asat
+subplot_mean_phys$treatment <- as.factor(subplot_mean_phys$treatment)
+subplot_mean_phys$Replicate <- as.factor(subplot_mean_phys$Replicate)
+subplot_mean_phys$Year <- as.factor(subplot_mean_phys$Year)
+
+# clean up my all_data df for model run
+subplot_mean_phys$disturbance_severity <- as.factor(subplot_mean_phys$disturbance_severity)
+
+# recode 0 to 0.00 to help me when with the post-hoc output
+subplot_mean_phys$disturbance_severity <- recode_factor(subplot_mean_phys$disturbance_severity, "0" = "0.00")
+
+## check model assumptions: normality, homogeneity of variances
+# shapiro.test(subplot_mean_phys$Subplot_mean_Asat) # data are normally distributed
+# library(car)
+# leveneTest(Subplot_mean_Asat ~ disturbance_severity, data=subplot_mean_phys) # data have homogeneity of variance
+
+## FINAL Asat MODEL: split-split plot ANOVA
+Asatmodel <- aov(Subplot_mean_Asat ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = subplot_mean_phys)
+
+summary(Asatmodel)
+
+## post-hoc analysis, Asat
+# note that values in the test come from the summary ANOVA table generated in previous step
+library(agricolae)
+with(subplot_mean_phys, LSD.test(Subplot_mean_Asat, disturbance_severity:Year,72,1.47, console = TRUE))
+
+### gs (a.k.a. stomatal conductance)
+# shapiro.test(subplot_mean_phys$Subplot_mean_Cond) #data are not normally distributed...
+# leveneTest(Subplot_mean_Cond ~ disturbance_severity, data=subplot_mean_phys) # ...but variances are homogeneous
+
+## FINAL gs MODEL: split-split plot ANOVA
+Condmodel <- aov(Subplot_mean_Cond ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = subplot_mean_phys)
+
+summary(Condmodel)
+
+## post-hoc analysis, gs
+with(subplot_mean_phys, LSD.test(Subplot_mean_Cond, disturbance_severity:Year,72,0.00061, console = TRUE))
+```
+
+## O2.1 Analysis Part 2: LMA & Reflectance
+
+LMA and N-related leaf reflectance indices (NDVI, PRI, NPCI, and RENDVI). PRI is associated with the xanthophyll cycle and is often used as a proxy for leaf-level light use efficiency [ref](https://nph.onlinelibrary.wiley.com/doi/10.1111/j.1469-8137.1995.tb03064.x). **reNDVI (red-edge NDVI) is associated with chlorophyll content and more broadly, foliar N.** NPCI (normalized pigment chlorophyll ratio index) is another narrow-band index that may be more informative about physiological change over time than NDVI [ref](https://doi.org/10.1016/0034-4257(94)90136-8). 
+
+I have unbalanced sampling for reflectance to consider, since only broad-leaved trees could be sampled with the leaf mini-spectrometer. This should not be a huge deal in ANOVA but is something to be aware of.
+
+I tested assumptions for ANOVA as before, with Shapiro-Wilk for normality & Levene's (and/or Bartlett's) for homogeneity of variances. Here is the summary of findings for each data set for each test:
+
+LMA: non-normal, non-homogeneous variance (--> tried transforming LMA with 1/x and log(x))
+
+**1/x transformed LMA:** still not normal (but larger p-value for Shapiro Wilk test, and appears less skewed/more normal...still gonna run the ANOVA since it's mostly robust to non-normality), homogeneous variances with Bartlett's test (p = 0.11).
+
+NDVI: non-normal, homogeneous variance (boxplot for control in 2020, and to a lesser extent in 2019, shows much greater spread than other severities or control in other years and would need cleaning/explanation)
+
+PRI: non-normal, non-homogeneous (probably going to skip this one; 2018 had some extremely low values during exceptionally hot and dry days that would need to be handled somehow or discarded. Not convinced the effort is warranted if other indices are as or more useful.)
+
+NPCI: non-normal, homogeneous variance (probably going to skip this one; lots of difference between years that needs explanation, or may be driven in part by instrument malfunction)
+
+**reNDVI:** normal, non-homogeneous (but only barely, so I'm not worrying about it) Looks like this is the index to use!
+
+I am using the same split-split plot ANOVA type used for Asat and gs for the LMA and reNDVI analysis. 
+
+### Results
+**LMA** (transformed as 1/x) yielded **no significant effect of disturbance severity or interactions**. The only significant effect in the split-split plot ANOVA was the **main effect of Year (p < 0.01)**, with 2019 being significantly different from 2018, 2020, and 2021.
+
+**reNDVI** is emerging as the easiest reflectance index to work with, although NDVI is close and could probably be cleaned up as a data set for use. reNDVI yielded another **significant year:severity interaction effect (p < 0.001)** and a **significant main effect of year (p < 0.001)**. Post-hoc LSD analysis indicated that the following disturbance severity-year combinations were significantly different from the control treatment in that particular year: 2018:85, 2020 (45, 65, 85), and 2021 (45, 65, 85).
+
+
+
+```{r, echo=FALSE}
+###### LMA
+morph <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/cleaned_data_for_analyses/lma_sc_all_years.csv")
+indices <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/cleaned_data_for_analyses/Reflectance_indices_sc_all_years.csv")
+
+## bring in the FoRTE subplots treatment assignments
+library(readr)
+urlfile="https://raw.githubusercontent.com/lisahaber/fortedata/master/inst/extdata/fd_subplots.csv" #github link for raw fortedata file with treatment and severity assignments
+treatments <- read_csv(url(urlfile))
+require(tidyverse)
+
+treatments <- treatments %>%
+  mutate(Zero = "0")
+
+treatments <- treatments %>% 
+  unite(Subplot, c("replicate", "Zero", "plot", "subplot"), sep="")
+
+## now join to treatments data
+treatments1 <- treatments %>%
+  select(Subplot, disturbance_severity, treatment)
+
+# no_pines <- morph %>%
+#   filter(Species != "pist") %>%
+#   filter(Species != "pire") %>%
+#   group_by(Subplot, Year) %>%
+#   summarize(mean_lma = mean(LMA_gm2))
+# no_pines <- left_join(no_pines, treatments1, by = "Subplot")
+
+morph <- morph %>%
+  group_by(Subplot, Year) %>%
+  summarize(mean_lma = mean(LMA_gm2))
+df2 <- left_join(morph, treatments1, by = "Subplot")
+
+# ## visualize the LMA data
+# lma_scatter <- df2 %>%
+#   ggplot(aes(x = Year, y = mean_lma)) + 
+#   geom_point()
+# 
+# lma_scatter
+
+# Basic density for LMA
+dens2lma <- ggplot(df2, aes(x=mean_lma)) +
+  geom_histogram(aes(y=..density..)) +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(df2$mean_lma),
+                            sd = sd(df2$mean_lma)),
+                col = "#1b98e0",
+                size = 3) +
+  ggtitle("Histogram of Subplot Mean LMA Values, 2018-2021")
+
+dens2lma
+
+df2$disturbance_severity <- as.factor(df2$disturbance_severity)
+
+bp3 <- df2 %>%
+  ggplot(aes(x = disturbance_severity, y = mean_lma, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM leaf mass per area (g/cm2)') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp3 #subplot mean LMA, all years
+
+##################################################### LMA
+# add replicate to the LMA dataset
+df2$Replicate <-
+  ifelse(grepl("A...", df2$Subplot),
+         "A",
+         ifelse(grepl("B...", df2$Subplot),
+                "B",
+                ifelse(grepl("C...", df2$Subplot),
+                       "C",
+                       ifelse(grepl("D...", df2$Subplot),
+                              "D", "Other"
+                       ))))
+
+# clean up my LMA df for model run
+# df2$disturbance_severity <- as.factor(df2$disturbance_severity)
+df2$treatment <- as.factor(df2$treatment)
+df2$Replicate <- as.factor(df2$Replicate)
+df2$Year <- as.factor(df2$Year)
+
+# recode 0 to 0.00 to help me when with the post-hoc output
+df2$disturbance_severity <- recode_factor(df2$disturbance_severity, "0" = "0.00")
+
+## check model assumptions: normality & homogeneity of variances
+# shapiro.test(df2$mean_lma) # LMA severely non-normal; probably need a non-parametric test for this, or transformation
+# 
+# library(car)
+# leveneTest(mean_lma ~ disturbance_severity, data=df2) # also, non-homogeneous variances
+
+# ## lme model
+# library(lme4)
+
+# 
+# LMAmixed <- lmer(mean_lma ~ disturbance_severity + (1|Year) + (1|Replicate), data = df2)
+# summary(LMAmixed)
+# plot(LMAmixed, which = 1)
+
+#### Try 1/x transformation for LMA
+transformed_lma <- df2 %>%
+  mutate(trans_lma = 1/mean_lma)
+
+dens1lma_xform <- ggplot(transformed_lma, aes(x=trans_lma)) +
+  geom_histogram(aes(y=..density..)) +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(transformed_lma$trans_lma),
+                            sd = sd(transformed_lma$trans_lma)),
+                col = "#1b98e0",
+                size = 3) +
+  ggtitle("Histogram of 1/x Transformed Subplot Mean LMA Values, 2018-2021")
+
+dens1lma_xform
+
+## graph transformed data in boxplots
+bp6 <- transformed_lma %>%
+  ggplot(aes(x = disturbance_severity, y = trans_lma, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('1/x leaf mass per area (g/cm2)') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp6
+
+# shapiro.test(transformed_lma$trans_lma) # not normal with SW test
+# leveneTest(trans_lma ~ disturbance_severity, data=transformed_lma) # not homogeneous with Levene's....
+# bartlett.test(trans_lma ~ disturbance_severity, data=transformed_lma) # but homogeneous with Bartlett's
+# ks.test(transformed_lma$trans_lma, pnorm) # not normal with KS test
+
+# transMixed <- lmer(trans_lma ~ disturbance_severity + (1|Year) + (1|Replicate), data = transformed_lma)
+# summary(transMixed)
+# plot(transMixed, which=1) # no apparent pattern in residuals; conflicting results from Bartlett's & Levene's 
+
+### this model only works on transformed data: ANOVA
+## FINAL LMA MODEL: split-split plot ANOVA
+LMAanova <- aov(trans_lma ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = transformed_lma)
+
+summary(LMAanova)
+
+## post-hoc analysis, LMA (1/x transformed)
+library(agricolae)
+with(transformed_lma, LSD.test(trans_lma, Year, 72,0.00000728, console = TRUE))
+
+##### Try log transformation for LMA
+# log_transformed_lma <- df2 %>%
+#   mutate(log_trans_lma = log10(mean_lma))
+# 
+# dens2lma_xform <- ggplot(log_transformed_lma, aes(x=log_trans_lma)) +
+#   geom_histogram(aes(y=..density..)) +
+#   stat_function(fun = dnorm,
+#                 args = list(mean = mean(log_transformed_lma$log_trans_lma),
+#                             sd = sd(log_transformed_lma$log_trans_lma)),
+#                 col = "#1b98e0",
+#                 size = 3) +
+#   ggtitle("Histogram of log Transformed Subplot Mean LMA Values, 2018-2021")
+# 
+# dens2lma_xform ## log transform is worse than 1/x transform
+# shapiro.test(log_transformed_lma$log_trans_lma) # not normal
+
+## Try standardizing/normalizing the LMA data and check assumptions:
+# norm_lma <- df2 %>%
+#   mutate(norm_lma = (mean_lma - mean(mean_lma))/sd(mean_lma))
+# 
+# dens3lma_xform <- ggplot(norm_lma, aes(x=norm_lma)) +
+#   geom_histogram(aes(y=..density..)) +
+#   stat_function(fun = dnorm,
+#                 args = list(mean = mean(norm_lma$norm_lma),
+#                             sd = sd(norm_lma$norm_lma)),
+#                 col = "#1b98e0",
+#                 size = 3) +
+#   ggtitle("Histogram of NOrmalized Subplot Mean LMA Values, 2018-2021")
+# 
+# dens3lma_xform 
+# shapiro.test(norm_lma$norm_lma) # not normal
+
+## Exclude pines and see what data look like
+# dens_lma_no_pines <- ggplot(no_pines, aes(x=mean_lma)) +
+#   geom_histogram(aes(y=..density..)) +
+#   stat_function(fun = dnorm,
+#                 args = list(mean = mean(no_pines$mean_lma),
+#                             sd = sd(no_pines$mean_lma)),
+#                 col = "#1b98e0",
+#                 size = 3) +
+#   ggtitle("Histogram of Subplot Mean LMA Values for Broadleaves ONLY, 2018-2021")
+# dens_lma_no_pines
+# 
+# shapiro.test(no_pines$mean_lma)
+```
+
+```{r eval=FALSE, include=FALSE}
+####### NDVI 
+ndvi <- indices %>%
+  group_by(Subplot, Year) %>%
+  filter(Calculation == "NDVI") %>%
+  summarize(mean_ndvi = mean(Value))
+
+df3 <- left_join(ndvi, treatments1, by = "Subplot")
+
+df3$disturbance_severity <- as.factor(df3$disturbance_severity)
+
+bp4 <- df3 %>%
+  ggplot(aes(x = disturbance_severity, y = mean_ndvi, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM NDVI') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp4
+
+# Basic density for NDVI
+dens2ndvi <- ggplot(df3, aes(x=mean_ndvi)) +
+  geom_histogram(aes(y=..density..)) +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(df3$mean_ndvi),
+                            sd = sd(df3$mean_ndvi)),
+                col = "#1b98e0",
+                size = 3) +
+  ggtitle("Histogram of Subplot Mean NDVI Values, 2018-2021")
+
+dens2ndvi
+
+########################################################### NDVI
+# add replicate to the NDVI dataset
+df3$Replicate <-
+  ifelse(grepl("A...", df3$Subplot),
+         "A",
+         ifelse(grepl("B...", df3$Subplot),
+                "B",
+                ifelse(grepl("C...", df3$Subplot),
+                       "C",
+                       ifelse(grepl("D...", df3$Subplot),
+                              "D", "Other"
+                       ))))
+
+# clean up my NDVI df for model run
+df3$disturbance_severity <- as.factor(df3$disturbance_severity)
+df3$treatment <- as.factor(df3$treatment)
+df3$Replicate <- as.factor(df3$Replicate)
+df3$Year <- as.factor(df3$Year)
+
+# recode 0 to 0.00 to help me when with the post-hoc output
+# df3$disturbance_severity <- recode_factor(df3$disturbance_severity, "0" = "0.00")
+
+shapiro.test(df3$mean_ndvi) # not normal
+
+library(car)
+leveneTest(mean_ndvi ~ disturbance_severity, data=df3) # homogeneous variance
+
+# LME for NDVI
+# NDVImixed <- lmer(mean_ndvi ~ disturbance_severity + (1|Year) + (1|Replicate), data = df3)
+# summary(NDVImixed)
+# plot(NDVImixed, which = 1)
+# 
+# ## graph scatter color-coded by year to try to see where outlier data are (assume they are from 2020 for NDVI, but verify this)
+# p22 <- df3 %>%
+#   ggplot(aes(x = disturbance_severity, y = mean_ndvi, label = Subplot)) + 
+#   theme_classic(base_size = 15) + 
+#   geom_point(show.legend = FALSE, size=3) +
+#   xlab("Disturbance Severity") +
+#   ylab("NDVI") +
+#   geom_text(check_overlap = TRUE, hjust = 0, nudge_x = 0.1, size= 2) +
+#   facet_grid(~Year)
+# 
+# p22
+# 
+#This model will not work: ANOVA
+NDVImodel <- aov(mean_ndvi ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = df3)
+
+summary(NDVImodel)
+
+```
+
+```{r eval=FALSE, include=FALSE}
+
+## PRI
+pri <- indices %>%
+  group_by(Subplot, Year) %>%
+  filter(Calculation == "PRI") %>%
+  summarize(mean_pri = mean(Value))
+
+df4 <- left_join(pri, treatments1, by = "Subplot")
+
+df4$disturbance_severity <- as.factor(df4$disturbance_severity)
+
+pri_outliers <- pri %>%
+  filter(mean_pri < 0.1) ## 2018: C01E, C01W, C02E, C02W, D04E, D04W were all measured on 7/11 - 7/12/18. Check on weather and soil moisture -- these may have just been excessively stressful days yielding unrepresentatively low PRI values. In 2019: D04E, D02W. In 2021: D01W
+
+bp5 <- df4 %>%
+  ggplot(aes(x = disturbance_severity, y = mean_pri, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM PRI') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp5
+
+# Basic density for PRI
+dens2pri <- ggplot(df4, aes(x=mean_pri)) +
+  geom_histogram(aes(y=..density..)) +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(df4$mean_pri),
+                            sd = sd(df4$mean_pri)),
+                col = "#1b98e0",
+                size = 3) +
+  ggtitle("Histogram of Subplot Mean PRI Values, 2018-2021")
+
+dens2pri
+
+############################################################### PRI
+# add replicate to the PRI dataset
+df4$Replicate <-
+  ifelse(grepl("A...", df4$Subplot),
+         "A",
+         ifelse(grepl("B...", df4$Subplot),
+                "B",
+                ifelse(grepl("C...", df4$Subplot),
+                       "C",
+                       ifelse(grepl("D...", df4$Subplot),
+                              "D", "Other"
+                       ))))
+
+
+# df4$disturbance_severity <- as.factor(df4$disturbance_severity)
+df4$treatment <- as.factor(df4$treatment)
+df4$Replicate <- as.factor(df4$Replicate)
+df4$Year <- as.factor(df4$Year)
+
+# recode 0 to 0.00 to help me when with the post-hoc output
+# df4$disturbance_severity <- recode_factor(df4$disturbance_severity, "0" = "0.00")
+
+shapiro.test(df4$mean_pri) # not normal
+
+library(car)
+leveneTest(mean_pri ~ disturbance_severity, data=df4) # no homogeneity
+
+## graph scatter color-coded by year to try to see where outlier data are (assume they are from 2019, but verify this)
+# p21 <- df4 %>%
+#   ggplot(aes(x = disturbance_severity, y = mean_pri, label = Subplot)) + 
+#   theme_classic(base_size = 15) + 
+#   geom_point(show.legend = FALSE, size=3) +
+#   xlab("Disturbance Severity") +
+#   ylab("PRI") +
+#   geom_text(check_overlap = TRUE, hjust = 0, nudge_x = 0.1, size= 2) +
+#   facet_grid(~Year)
+# 
+# p21
+
+# LME for PRI
+# PRImixed <- lmer(mean_pri ~ disturbance_severity + (1|Year) + (1|Replicate), data = df4)
+# summary(PRImixed)
+# plot(PRImixed, which = 1)
+
+#This model will not work: ANOVA
+# PRImodel <- aov(mean_pri ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = df4)
+# 
+# summary(PRImodel)
+
+```
+
+```{r, echo=FALSE}
+
+## RENDVI
+rendvi <- indices %>%
+  group_by(Subplot, Year) %>%
+  filter(Calculation == "RENDVI") %>%
+  summarize(mean_rendvi = mean(Value))
+
+df13 <- left_join(rendvi, treatments1, by = "Subplot")
+
+df13$disturbance_severity <- as.factor(df13$disturbance_severity)
+
+bp14 <- df13 %>%
+  ggplot(aes(x = disturbance_severity, y = mean_rendvi, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM RENDVI') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp14
+
+## Basic density for RENDVI
+dens2rendvi <- ggplot(df13, aes(x=mean_rendvi)) +
+  geom_histogram(aes(y=..density..)) +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(df13$mean_rendvi),
+                            sd = sd(df13$mean_rendvi)),
+                col = "#1b98e0",
+                size = 3) +
+  ggtitle("Histogram of Subplot Mean RENDVI Values, 2018-2021")
+
+dens2rendvi
+
+#################################################################### RENDVI
+# add replicate to the RENDVI dataset
+df13$Replicate <-
+  ifelse(grepl("A...", df13$Subplot),
+         "A",
+         ifelse(grepl("B...", df13$Subplot),
+                "B",
+                ifelse(grepl("C...", df13$Subplot),
+                       "C",
+                       ifelse(grepl("D...", df13$Subplot),
+                              "D", "Other"
+                       ))))
+
+
+df13$disturbance_severity <- as.factor(df13$disturbance_severity)
+df13$treatment <- as.factor(df13$treatment)
+df13$Replicate <- as.factor(df13$Replicate)
+df13$Year <- as.factor(df13$Year)
+
+# recode 0 to 0.00 to help me when with the post-hoc output
+# df4$disturbance_severity <- recode_factor(df4$disturbance_severity, "0" = "0.00")
+
+# shapiro.test(df13$mean_rendvi) 
+# 
+# library(car)
+# leveneTest(mean_rendvi ~ disturbance_severity, data=df13) 
+
+### ANOVA for RENDVI
+RENDVIanova <- aov(mean_rendvi ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = df13)
+
+summary(RENDVIanova)
+
+## post-hoc analysis
+library(agricolae)
+with(df13, LSD.test(mean_rendvi, disturbance_severity:Year,72,0.000492, console = TRUE))
+
+```
+
+```{r eval=FALSE, include=FALSE}
+## NPCI
+npci <- indices %>%
+  group_by(Subplot, Year) %>%
+  filter(Calculation == "NPCI") %>%
+  summarize(mean_npci = mean(Value))
+
+df14 <- left_join(npci, treatments1, by = "Subplot")
+
+df14$disturbance_severity <- as.factor(df14$disturbance_severity)
+
+bp15 <- df14 %>%
+  ggplot(aes(x = disturbance_severity, y = mean_npci, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM NPCI') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp15
+
+# Shapiro-Wilk
+shapiro.test(df14$mean_npci) ## not normal
+
+# Levene's
+car::leveneTest(mean_npci ~ disturbance_severity, data=df14) ## homogeneous variance
+
+
+```
+## O2.1 Conclusions
+In split-split plot ANOVAs for each trait, **three of the four examined leaf functional traits** (light-saturated rate of leaf photosynthesis, leaf stomatal conductance, and leaf reNDVI) had subplot mean values that had **significant relationships with both year (p < 0.001 in all three models) and year:severity interaction (Asat: p < 0.05; gs: p < 0.1; reNDVI: p < 0.001).** The fourth leaf functional trait, subplot mean **leaf mass per area,** also had a **significant relationship with year (p < 0.01),** but this relationship was not modulated by disturbance severity (i.e. no significant disturbance-by-year interaction effect). 
+
+All four leaf functional traits (Asat, gs, LMA, reNDVI) had a significant relationship with the main effect of year in the ANOVA linear models from O2.1. Therefore, **year needs to be incorporated in O2.2 models** for how these traits vary with canopy structure (as VAI).
+
+
+# Chapter 2 Objectives and Hypotheses: O2.2
+O2.2: Determine whether disturbance-altered canopy vegetative area index (VAI) relates to changes in subcanopy leaf functional trait CWMs with rising disturbance severity.
+
+H2.2: High severity disturbance (i.e. loss of the majority of canopy leaves) will reduce canopy vegetative area, leading to increases in subcanopy light availability and more sun-adapted leaf functional trait CWMs. 
+
+Analysis O2.2:
+To examine whether canopy structure across the FoRTE landscape drives differential subcanopy leaf functional traits (O2.2), I will follow two steps. First, I will test whether canopy vegetative area index (VAI) is related to disturbance severity, type, and year. To accomplish this, I will use an identical model to that outlined in Equation 2.1, with my outcome variable (Yijkl) as VAI. All other parameters (i.e. the entire right-hand side of the equation) will be the same as previously described. 
+
+Once I have tested the relationship between disturbance, year, and VAI, I will then proceed to address the core of O2.2. This objective seeks to determine whether disturbance-altered canopy structure – regardless of landform type/experimental replicate, or interannual climatic variability – relates to subcanopy CWM leaf functional traits across FoRTE as disturbance has unfolded. To answer this question, I will use a series of linear mixed effect models following the general form described in Equation 2.2 below:
+
+y_i=x_i β + z_i u_i + ε_i					
+u_i  ~ N(0,σ^2 )
+ε_i~ N(0,R_i )						(2.2)
+
+Where yi is the vector of N observations of the outcome variable; xi and zi are design matrices for the fixed and random effects, respectively; β is the vector of fixed parameters; ui is the vector of random parameters; ε_iis the vector of residuals; and Ri is the variance-covariance matrix for the error term.
+
+In my analysis, normally-distributed CWM leaf functional traits (except for LMA, which is not normally distributed) will be the outcome, while normally-distributed VAI, year, replicate, and the interaction of VAI and year will be the predictors. VAI, year, and their interaction are fixed effects and will have regression coefficients of interest, while replicate is a random effect (analagous to an experimental block). The goal of this modeling effort is to determine whether, after accounting for experimental replicate and interannual climatic variability, there is a significant relationship between canopy VAI and subcanopy CWM leaf traits. Full models (including the interaction term) will be fit initially and contrasted with simpler models (excluding the interaction term). The best candidate model (i.e. with the lowest AIC score) will be chosen as the final model for each CWM. All models will be fit using the ‘lmer’ function from R package lme4 (Bates et al., 2015), using restricted maximum likelihood criteria. Equation 2.3 below gives this model:
+
+Y_i= β_0 + β_1VAI_i + β_2Year_i + β_3VAI:Year_i + Rep_i + ε_i					(2.3)
+
+Where Yi is the ith subplot’s CWM leaf functional trait (Asat, reNDVI, LMA, or gs), β_0 is the global intercept, β_1 through β_3 are regression coefficients, VAIi is the subplot level mean vegetative area index, Yeari is year (2018-2021), VAI:Yeari is the interaction between VAI and year, Rep_i is the random effect of experimental replicate, and ε_i is the residual error term.
+
+
+### A note on lme4 and modeling for O2.2 and O2.3:
+
+We are missing some observations for VAI in some subplots in some years.
+
+We will need to use linear mixed effects models here. Grouping variable is the replicate (a random effect), and year is also a random effect. Random-slope, random-intercept model type with year + (year|replicate) notation in lme4 would be ideal, but probably requires more data than I have to work with (because model is more complex & random slopes estimation requires more information). If I used this structure, the effect of year would be assumed to depend on the replicate, rather than the effect of replicate depending on the year (reflecting restricted randomization scheme from the ANOVA models used earlier). However, based on what I have read and particularly on these resources [1](https://stats.stackexchange.com/questions/378939/dealing-with-singular-fit-in-mixed-models), [2](https://rdrr.io/cran/lme4/man/isSingular.html), & [3](https://stackoverflow.com/questions/60028673/lme4-error-boundary-singular-fit-see-issingular) from Ben Bolker, I am going to go with a random intercepts model. I think this makes sense given that I expect the impacts of year (i.e. climate) on leaf traits within each replicate to be similar.
+
+**Since treatment type (bottom-up, top-down) has not been found to be important in any of the prior modeling, I leave it out of this analysis.**
+
+## Results: VAI vs. Disturbance Severity:
+
+**Year:severity interaction is significant for 85:2021 (p < 0.01) and 65:2021 (p < 0.05)**. Random effect variance estimated for replicate (53.5 %). 
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+## O2.2 Analysis Part 1: same analysis as above, but using VAI as outcome variable. 
+
+## bring in VAI data -- note that 2021 data is not in the fortedata package yet and has to be appended from a file Kerstin N. provided
+library(fortedata)
+
+VAI_subplot_3yrs <- fortedata::fd_canopy_structure() %>%
+  select(subplot_id, replicate, year, plot, subplot, vai_mean) %>%
+  group_by(year, replicate, plot, subplot) %>%
+  summarize(mean_vai = mean(vai_mean)) %>%
+  mutate(Zero = "0")
+
+unique(VAI_subplot_3yrs$year) #just checking -- yes, this data set is currently missing 2021 data
+
+VAI_subplot_3yrs <- VAI_subplot_3yrs %>% 
+  unite(Subplot, c("replicate", "Zero", "plot", "subplot"), sep="")
+
+# now bring in 2021 data from Kerstin N
+VAI_subplot_2021 <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/umbs_pcl_2021.csv") %>%
+  select(Subplot, vai.mean) %>%
+  mutate(year = 2021) %>%
+  group_by(Subplot, year) %>%
+  summarize(mean_vai = mean(vai.mean))
+
+# now join tables
+VAI_all_years <- rbind(VAI_subplot_3yrs, VAI_subplot_2021) %>%
+  rename(Year = year) 
+
+# now join to Asat data
+# first refactor Year in VAI data
+VAI_all_years$Year <- as.factor(VAI_all_years$Year)
+Asat_VAI <- left_join(subplot_mean_phys, VAI_all_years, by = c("Subplot", "Year")) 
+
+# look at trends in VAI over time
+bp7 <- Asat_VAI %>%
+  ggplot(aes(x = disturbance_severity, y = mean_vai, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("% Gross Defoliation") +
+  ylab("Canopy VAI (unitless)") + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp7 
+
+## ANOVA will not work because we are missing observations in some subplots for some years. We need to instead use a linear mixed effects model. Our design is a split-split plot with unbalanced repeated measures
+
+VAImodel1 <- lmer(mean_vai ~ disturbance_severity*Year + (1|Replicate), data = Asat_VAI)
+summary(VAImodel1) # Model 1 includes interaction of disturbance severity and year, similar to ANOVA used for 02.1. This will treat both disturbance and year as fixed effects while replicate is a random effect.
+AIC(VAImodel1)
+
+# VAImodel2 <- lmer(mean_vai ~ disturbance_severity + (1|Year) + (1|Replicate), data = Asat_VAI)
+# summary(VAImodel2) # Model 2 includes no interactions but additive random effects of Year and Replicate
+# AIC(VAImodel2) ##Model 2: No interactions included. Disturbance is a significant main effect at all four levels (45, p < 0.05; 65, p < 0.001; 85, p < 0.001). Random effect variance estimated for year (15.1 %) and replicate (45.0 %). This model had the lowest AIC score (4 points lower than Model 1).
+
+# VAImodel3 <- lmer(mean_vai ~ disturbance_severity*Year + (1|Year) + (1|Replicate), data = Asat_VAI)
+# summary(VAImodel3) 
+# Model 3 includes interaction of disturbance severity and year (with year as fixed effect, I think), and also year as a separate random effect. Model 3 makes no sense...
+# also, Model 3 does not work.
+
+# VAImodel4 <- lmer(mean_vai ~ disturbance_severity + (1|Replicate/Year), data = Asat_VAI)
+# summary(VAImodel4) ## Year is a nested random effect within the random effect of replicate, as in the ANOVA for O2.1.
+# AIC(VAImodel4) ## Model 4: No interactions included. Disturbance is a significant main effect at all four levels (45, p < 0.05; 65, p < 0.001; 85, p < 0.001). Random effect variance estimated for year:replicate (18.2 %) and replicate (41.8 %).
+
+# VAImodel5 <- lmer(mean_vai ~ disturbance_severity*treatment + (1|Replicate/Year), data = Asat_VAI)
+# summary(VAImodel5)
+# Model 5 includes treatment and disturbance as fixed effects, year and replicate as nested (year within replicate) random effects.
+# Model 5 runs but isn't super useful since treatment was not important in any earlier models and isn't significant here, either.
+
+# VAImodel6 <- lmer(mean_vai ~ disturbance_severity*treatment*Year + (1|Replicate), data = Asat_VAI)
+# summary(VAImodel6) ## treatment and its interactions are all non-significant, so remove from model and use simpler model structure
+# AIC(VAImodel6) ## Model 6: Three-way interactions of disturbance severity, treatment type, and year included. No significant main effects and only the two-way interaction of disturbance:year (85:2021) was significant (p < 0.05). Once again, treatment is NOT significant so it can be removed from the analysis.
+
+# VAImodel7 <- lmer(mean_vai ~ disturbance_severity*treatment + (1|Replicate) + (1|Year), data = Asat_VAI)
+# summary(VAImodel7)
+
+## show random effects and table
+re.effects.VAI <- sjPlot::plot_model(VAImodel1, type = "re", show.values = TRUE, title="Effect of Landform Type (i.e. Replicate) on Canopy VAI")
+re.effects.VAI
+# show summary
+sjPlot::tab_model(VAImodel1)
+```
+
+## Results: Asat & VAI
+
+**Mean VAI (p < 0.05), Year (p < 0.001), and VAI:Year (2019:VAI, p < 0.05; 2020:VAI & 2021:VAI, p < 0.001) were all significant fixed effects in the linear mixed effects model.** Random effect variance estimate for replicate (29.8 %). **This model also has the lowest AIC score of any candidate model listed.**
+
+```{r, echo=FALSE, warning=FALSE}
+####### Part 2 of 02.2: Asat
+# lmeAsatVAI1 <- lmer(Subplot_mean_Asat ~ mean_vai + (1|Year) + (1|Replicate), data = Asat_VAI)
+# summary(lmeAsatVAI1)
+# AIC(lmeAsatVAI1) ## Model 1: Subplot mean VAI is a significant main effect (p < 0.001). Random effect variance estimates for year (46.3 %) and replicate (9.6 %).
+
+lmeAsatVAI2 <- lmer(Subplot_mean_Asat ~ mean_vai*Year + (1|Replicate), data = Asat_VAI)
+summary(lmeAsatVAI2) # this model is like #2 for VAI vs disturbance. This is probably the best candidate model structure to use.
+AIC(lmeAsatVAI2)
+
+# lmeAsatVAI3 <- lmer(Subplot_mean_Asat ~ mean_vai*Year + (1|Year) + (1|Replicate), data = Asat_VAI)
+# summary(lmeAsatVAI3)  ## this model fails
+
+# lmeAsatVAI4 <- lmer(Subplot_mean_Asat ~ mean_vai + (mean_vai|Year) + (1|Replicate/Year), data = Asat_VAI)
+# summary(lmeAsatVAI4) # too complex, not even sure what this means...
+
+# lmeAsatVAI5 <- lmer(Subplot_mean_Asat ~ mean_vai + (1|Replicate:Year), data = Asat_VAI)
+# summary(lmeAsatVAI5) ## I think this model crosses the replicate and year. 
+# AIC(lmeAsatVAI5) ## Model 5: Mean VAI (p < 0.001) is a significant main effect. Replicate:year variance (57.0 %).
+
+# lmeAsatVAI6 <- lmer(Subplot_mean_Asat ~ mean_vai + (1|Year/Replicate), data = Asat_VAI)
+# summary(lmeAsatVAI6)
+# AIC(lmeAsatVAI6) ## Model 6: Mean VAI (p < 0.001) is a significant main effect. Replicate:year (18.5 %) and year (41.6 %) variance estimated.
+
+# lmeAsatVAI7 <- lmer(Subplot_mean_Asat ~ mean_vai + (1|Replicate/Year), data = Asat_VAI)
+# summary(lmeAsatVAI7)  ## this model fails to converge.
+
+# lmeAsatVAI8 <- lmer(Subplot_mean_Asat ~ mean_vai + (1|Replicate/disturbance_severity/treatment) + (1|Year), data = Asat_VAI) # this model fails (singular fit)
+# summary(lmeAsatVAI8)
+
+
+
+# lmAsatVAI <- lm(Subplot_mean_Asat ~ mean_vai + Year + Replicate, data = Asat_VAI)
+# summary(lmAsatVAI)
+# 
+# 
+Asat_VAI_no2018 <- Asat_VAI %>%
+  filter(Year != 2018)
+# 
+# lmeAsat_no2018 <- lmer(Subplot_mean_Asat ~ mean_vai + (1|Year) + (1|Replicate), data = Asat_VAI_no2018)
+# summary(lmeAsat_no2018) 
+
+
+## graph, Asat vs. VAI
+# Asat_VAI_only2018 <- Asat_VAI %>%
+#   filter(Year == 2018)
+
+# p11 <- Asat_VAI %>%
+#   ggplot(aes(x = mean_vai, y = Subplot_mean_Asat)) + 
+#   theme_classic(base_size = 15) + 
+#   geom_point(show.legend = FALSE, size=3) +
+#   xlab("Canopy VAI (unitless)") +
+#   ylab('Subcanopy CWM leaf photosynthetic rate (' *mu~ 'mol' ~CO[2]~ m^-2~s^-1*')') +
+#   geom_point(data=Asat_VAI_only2018, 
+#              aes(x=mean_vai,y=Subplot_mean_Asat), 
+#              color='red',
+#              size=3) +
+#   ggtitle("2018 (red) & 2019-2021 (black)")
+# 
+# p11
+
+
+# p12 <- Asat_VAI_no2018 %>%
+#   ggplot(aes(x = mean_vai, y = Subplot_mean_Asat)) + 
+#   theme_classic(base_size = 15) + 
+#   geom_point(show.legend = FALSE, size=3) +
+#   xlab("Canopy VAI (unitless)") +
+#   ylab('Subcanopy CWM leaf photosynthetic rate (' *mu~ 'mol' ~CO[2]~ m^-2~s^-1*')') +
+#   geom_smooth(method = "lm") +
+#   ggtitle("Post-disturbance Asat vs. VAI, 2019-2021")
+# 
+# p12
+
+# fit1 <- lm(Subplot_mean_Asat ~ mean_vai, data = Asat_VAI_no2018)
+# summary(fit1)
+
+
+# another way to add to data frame
+Asat_VAI_noNAs <- Asat_VAI %>%
+  na.omit()
+
+Asat_VAI_noNAs$lmeAsatfit <- predict(lmeAsatVAI2)
+
+## try with all data, Model Fit #2
+
+mm_plot <- ggplot(Asat_VAI_noNAs, aes(x = mean_vai, y = Subplot_mean_Asat, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 13) +
+      geom_smooth(data = cbind(Asat_VAI_noNAs, pred = predict(lmeAsatVAI2)), aes(y = pred), method=lm, size = 1, na.rm=TRUE, se=FALSE) +  # adding predicted line from mixed model 
+  xlab("Canopy VAI (unitless)") +
+  ylab('Subcanopy CWM leaf photosynthetic rate (' *mu~ 'mol' ~CO[2]~ m^-2~s^-1*')')
+mm_plot
+
+## another try
+# Extract the prediction data frame
+pred.mm <- ggpredict(lmeAsatVAI2, terms = c("mean_vai"))  # this gives overall predictions for the model
+
+# Plot the predictions 
+
+# mm1 <- (ggplot(pred.mm) + 
+#    geom_line(aes(x = x, y = predicted)) +          # slope
+#    geom_ribbon(aes(x = x, ymin = predicted - std.error, ymax = predicted + std.error), 
+#                fill = "lightgrey", alpha = 0.5) +  # error band
+#    geom_point(data = Asat_VAI_noNAs,                      # adding the raw data (scaled values)
+#               aes(x = mean_vai, y = Subplot_mean_Asat, colour = Year)) + 
+#    labs(x = "Subplot Mean VAI (unitless)", y = "Subplot Mean Asat",
+#         title = "Modeled influence of VAI on Subcanopy Asat depends on Year") + 
+#    theme_minimal()
+# )
+# mm1
+
+## add random effects
+# re <- ggpredict(lmeAsatVAI2, terms = c("mean_vai", "Replicate"), type = "re") %>% 
+#    plot() +
+#    labs(x = "Mean Subplot VAI", y = "Mean Subplot Subcanopy Asat", title = "Effect of VAI on subcanopy mean Asat by replicate") + 
+#    theme_minimal()
+# re
+
+## plot random effect estimates
+library(sjPlot)
+
+# Visualise random effects 
+## these are intercept differences:  difference between the general intercept value found in your model summary and the estimate for this specific level of random effect
+re.effects.Asat <- sjPlot::plot_model(lmeAsatVAI2, type = "re", show.values = TRUE, show.p = TRUE, title="Effect of Landform Type (i.e. Replicate) on Subcanopy Asat")
+re.effects.Asat
+# show summary
+sjPlot::tab_model(lmeAsatVAI2)
+
+```
+
+## Results: gs & VAI:
+
+### Mixed effects models for gs:
+Both models including the random effect of replicate (Model 1 with no interactions, Model 2 with VAI:year interaction) resulted in singular fits. Basically the variance estimate for gs due to replicate is so small that it computes as zero, resulting in a singular fit. This may be due to the small (< 5, the generally agreed upon safe minimum) number of random effect levels for replicate. 
+
+Opinions on how best to handle this vary, but I am choosing to exclude the random effect term since it does not appear to contribute to the variance. This leaves me with a more parsimonious model that is also, sans random effect, simply a linear model.
+
+### Linear model for gs:
+I removed the random effect of replicate and tried again with a simpler model just including main effects of VAI and year with their interaction as well. **Year was significant (2019, p < 0.05; 2020, p < 0.01; 2021, p < 0.001), but VAI was not a significant main effect (p = 0.22). The interaction of VAI:year was significant for 2020 (p < 0.1) and 2021 (p < 0.05) but not for 2019 (p = 0.17)**.
+
+```{r, echo=FALSE}
+### Part 2 O2.2: gs
+
+## see what happens when you try centering and scaling your gs data, since values are so small compared to VAI values
+# Asat_VAI <- Asat_VAI %>%
+  # mutate(norm_Cond = (Subplot_mean_Cond - mean(Subplot_mean_Cond))/sd(Subplot_mean_Cond))
+  
+# lmeCondVAI1 <- lmer(Subplot_mean_Cond ~ mean_vai + (1|Year) + (1|Replicate), data = Asat_VAI)
+# summary(lmeCondVAI1) # This model results in singular fit. Variance estimate for replicate is zero.
+
+# lmeCondVAI2 <- lmer(Subplot_mean_Cond ~ mean_vai*Year + (1|Replicate), data = Asat_VAI)
+# summary(lmeCondVAI2) # This model also results in singular fit, same as above.  
+
+## linear model (no random effects)
+lmCondVAI <- lm(Subplot_mean_Cond ~ mean_vai*Year, data = Asat_VAI)
+summary(lmCondVAI) # This model removes replicate. Since there are no random effects, it becomes a linear model.
+
+### try with normalized conductivity data
+# lmeNormCondVAI1 <- lmer(norm_Cond ~ mean_vai + (1|Year) + (1|Replicate), data = Asat_VAI)
+# summary(lmeNormCondVAI1) # This model results in singular fit. Variance estimate for replicate is zero.
+# 
+# lmeNormCondVAI2 <- lmer(norm_Cond ~ mean_vai*Year + (1|Replicate), data = Asat_VAI)
+# summary(lmeNormCondVAI2) # This model also results in singular fit, same as above.  
+
+## graph results
+gs_plot <- ggplot(Asat_VAI_noNAs, aes(x = mean_vai, y = Subplot_mean_Cond, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 13) +
+      geom_smooth(data = cbind(Asat_VAI_noNAs, pred = predict(lmCondVAI)), aes(y = pred), method='lm', level=0.95, size = 1, na.rm=TRUE) +  # adding predicted line from mixed model 
+  xlab("Canopy VAI (unitless)") +
+  ylab('Subcanopy CWM leaf stomatal conductance (mol' ~CO[2]~ m^-2~s^-1*')')  # adding predicted line from mixed model 
+gs_plot
+
+# show summary
+sjPlot::tab_model(lmCondVAI)
+
+```
+
+## Results: LMA & VAI:
+Note: I am using untransformed (raw) LMA in this analysis since there is no requirement for normally distributed response variables for a linear mixed effects model.
+
+**No significant main effects of year or VAI, and no significant interactions at alpha = 0.1.**
+
+```{r, echo=FALSE}
+## join VAI data to the LMA dataset
+LMA_VAI <- left_join(df2, VAI_all_years, by = c("Subplot", "Year")) 
+
+## have a look at the bivariate plot
+p21 <- LMA_VAI %>%
+  na.omit() %>%
+  ggplot(aes(x = mean_vai, y = mean_lma, color = Year)) + 
+  theme_classic(base_size = 15) + 
+  geom_point(show.legend = TRUE, size=3) +
+  xlab("Canopy VAI (unitless)") +
+  ylab("Subcanopy Mean LMA (g/m2)") 
+
+p21
+
+# lmeLMAVAI1 <- lmer(mean_lma ~ mean_vai + (1|Year) + (1|Replicate), data = LMA_VAI)
+# summary(lmeLMAVAI1) ## singular fit # Model 1: Singular fit. Year variance estimate is 0. 
+
+lmeLMAVAI2 <- lmer(mean_lma ~ mean_vai*Year + (1|Replicate), data = LMA_VAI)
+summary(lmeLMAVAI2) # this model is like #2 for VAI vs disturbance. This is probably the best candidate model structure to use.
+
+# lmeLMAVAI3 <- lmer(mean_lma ~ mean_vai + (1|Replicate:Year), data = LMA_VAI)
+# summary(lmeLMAVAI3) ## I think this model crosses the replicate and year. ## Model 3: Significant main effect of VAI. Year is nested within replicate as a random effect, so this is unlikely to be the best model to use (deviates from structure used in other analyses).
+# 
+# lmeLMAVAI4 <- lmer(mean_lma ~ mean_vai + (1|Year/Replicate), data = LMA_VAI)
+# summary(lmeLMAVAI4) ## singular fit # Model 4: Singular fit.
+
+lmLMAVAI <- lm(mean_lma ~ mean_vai + Year + Replicate, data = LMA_VAI)
+summary(lmLMAVAI)
+
+# show summary
+sjPlot::tab_model(lmeLMAVAI2)
+
+```
+
+## Results: reNDVI & VAI:
+
+**Significant main effects for VAI (p < 0.05), Year (2019, p < 0.01; 2020, p < 0.1; 2021, ns). Significant interactions for mean VAI and year with 2019 and 2020 (p < 0.05) but not 2021 (p = 0.54).** Replicate accounts for 0.44% of variance.
+
+
+```{r, echo=FALSE}
+## VAI and leaf reflectance (RENDVI)
+RENDVI_VAI <- left_join(VAI_all_years, df13, by = c("Subplot", "Year")) 
+
+# lmeRENDVIVAI1 <- lmer(mean_rendvi ~ mean_vai + (1|Year) + (1|Replicate), data = RENDVI_VAI)
+# summary(lmeRENDVIVAI1)  ## singular fit; this model fails
+
+lmeRENDVIVAI2 <- lmer(mean_rendvi ~ mean_vai*Year + (1|Replicate), data = RENDVI_VAI)
+summary(lmeRENDVIVAI2) # this model is like #2 for VAI vs disturbance. This is probably the best candidate model structure to use.
+
+# lmeRENDVIVAI3 <- lmer(mean_rendvi ~ mean_vai + (1|Year), data = RENDVI_VAI)
+# summary(lmeRENDVIVAI3) ## significant main effect of VAI, p < 0.05
+
+# lmeRENDVIVAI4 <- lmer(mean_rendvi ~ mean_vai + (1|Replicate:Year), data = RENDVI_VAI)
+# summary(lmeRENDVIVAI4) ## significant main effect of VAI, p < 0.01
+
+## try plotting effect sizes:
+sjPlot::plot_model(lmeRENDVIVAI2,
+                   show.values=TRUE, show.p=TRUE,
+                   title="Effect of VAI and Year on Subplot reNDVI")
+
+sjPlot:: tab_model(lmeRENDVIVAI2)
+
+## make a data frame with effects from this model
+effects_rendvi_vai <- effects::effect(term= "mean_vai", mod= lmeRENDVIVAI2)
+summary(effects_rendvi_vai)
+x_rendvi_vai <- as.data.frame(effects_rendvi_vai)
+
+## this is a plot with all of the data, but doesn't illustrate interactions or years at all
+rendvi_vai_plot <- ggplot() +
+  geom_point(data = RENDVI_VAI, aes(x = mean_vai, y = mean_rendvi)) +
+  geom_point(data = x_rendvi_vai, aes(x = mean_vai, y = fit), color = "blue") +
+  geom_line(data = x_rendvi_vai, aes(x = mean_vai, y = fit), color="blue") +
+  geom_ribbon(data = x_rendvi_vai, aes(x=mean_vai, ymin=lower, ymax=upper), alpha= 0.3, fill="blue") +
+  labs(x="Subplot Mean VAI", y="Subplot Mean reNDVI")
+rendvi_vai_plot
+
+## try for years only:
+effects_rendvi_year <- effects::effect(term= "Year", mod= lmeRENDVIVAI2)
+summary(effects_rendvi_year)
+x_rendvi_year <- as.data.frame(effects_rendvi_year)
+
+# rendvi_year_plot <- ggplot() +
+#   geom_point(data = RENDVI_VAI, aes(x = Year, y = mean_rendvi)) +
+#   geom_point(data = x_rendvi_year, aes(x = Year, y = fit), color = "blue") +
+#   geom_line(data = x_rendvi_year, aes(x = Year, y = fit), color="blue") +
+#   geom_ribbon(data = x_rendvi_year, aes(x=Year, ymin=lower, ymax=upper), alpha= 0.3, fill="blue") +
+#   labs(x="Year", y="Subplot Mean reNDVI")
+# rendvi_year_plot
+
+## try an interaction plot
+interaction.plot(x.factor = RENDVI_VAI$Year, #x-axis variable
+                 trace.factor = RENDVI_VAI$Replicate, #variable for lines
+                 response = RENDVI_VAI$mean_rendvi, #y-axis variable
+                 fun = median, #metric to plot
+                 ylab = "Subplot Mean reNDVI (unitless)",
+                 xlab = "Year",
+                 col = c("green", "blue", "orange", "yellow"),
+                 lty = 1, #line type
+                 lwd = 2, #line width
+                 trace.label = "Replicate")
+
+```
+
+## O2.2 Conclusions
+In part one of this analysis, **the interaction of disturbance severity and year significantly related to subplot mean VAI, with 65% and 85% disturbance severity levels having significantly different mean VAI from control in 2021** in a linear mixed effects model. This result indicates the lagged impact of disturbance on canopy VAI, with significant disturbance effects only manifesting at three years post disturbance. Additionally, replicate (as a random effect) was found to contribute more than half of the total variance (53.5%), indicating a strong influence of landform type on variation in VAI across FoRTE.
+
+In the second part of this analysis, subplot mean leaf traits were examined via a series of linear mixed effects models to determine whether they related to disturbance-driven changes in VAI in interaction with time (Year). Note that the interaction with Year was retained in this modeling effort because in all cases in O2.1, these subplot mean leaf functional traits had been found to significantly relate to Year, with interactions between disturbance severity and year also significant. **Leaf light-saturated rate of photosynthesis and reNDVI were found to significantly relate to both VAI (p < 0.05) and year (Asat: p < 0.001; reNDVI: p < 0.1), with significant interactions between VAI and year (p < 0.05).** In contrast, **leaf stomatal conductance** was not found to significantly relate to VAI, but did have **a significant relationship with year (p < 0.05) and the interaction of year and VAI (p < 0.1).** Subplot mean leaf mass per area did not have any significant relationships to year, VAI, or their interaction in this analysis.
+
+Taken together, these results indicate that **disturbance did indeed impact canopy VAI, which in turn impacted subplot mean leaf functional traits in three of four tested relationships, modulated by interannual climatic variation (as year).**
+
+# Chapter 2 Objectives and Hypotheses: O2.3
+O2.3: Determine whether subcanopy CWM leaf functional traits correlate with ANPPw of the subcanopy stratum in the first three years following experimental disturbance.
+
+H2.3: Immediately following disturbance, when impacts to the structure and function of the canopy are just beginning to manifest, subcanopy CWM leaf functional traits will not respond to disturbance. However, as the ecosystem enters the more dynamic period in years 2-3 following disturbance, higher subcanopy ANNPw will be observed at higher disturbance severities, reflecting a shift in CWM functional traits toward high light acclimation.
+
+Analysis O2.3:
+To address O2.3, asking whether subcanopy ANPPw is predicted by community weighted mean leaf functional traits, I will again use linear mixed effects models. In these models, the outcome variable will be annual woody NPP for each subplot, and the predictors will be the continuous variables of CWM functional traits (those found to vary significantly with disturbance in the analysis for O2.1) and disturbance severity, and the random effect of year. Since I hypothesize an interaction between severity and year such that the impacts of disturbance will not initially manifest in changed subcanopy NPP, I also include this interaction term. These models will follow the form provided in Equation 2.4 below:
+
+Y_i= β_0+ β_1 〖CWM〗_i+ β_2 〖Sev〗_i+ β_3 〖CWM:Sev〗_i+〖Year〗_i+Sev:〖Year〗_i+〖 ε〗_i		(2.4)
+
+Where Yi is the ith subplot’s yearly ANPPw, beta terms are coefficients, CWMi is the leaf functional trait (Asat, NDVI, LMA, or gs), Sevi is disturbance severity, CWM:Sevi is the fixed effect interaction between the CWM functional trait and severity, Yeari is a random effect term for year (2018-2021), Sev:Yeari is the random effect interaction of disturbance severity with year, and epsilon is the residual error term.
+
+## Results: Subcanopy ANPPw vs disturbance severity & VAI
+In an identical analysis to O2.1, **Subcanopy ANPPw (log transformed) was found to significantly relate to both year (p < 0.001) and disturbance severity:year interaction (p < 0.001). In both 2020 and 2021 (but not in 2019), all three severities (45, 65, and 85%) were significantly different from controls.** In 2019 there were no significant differences with control at any severity level.
+
+I then used a linear mixed effects model to test the relationship between canopy VAI (using 2019-2021 VAI data) and subcanopy ANPPw, and found **no significant relationship of VAI, year, or their interaction to subcanopy ANPPw.**
+
+```{r, echo=FALSE}
+## Bring in NPP data
+npp <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/cleaned_data_for_analyses/subcan_npp_phys.csv")
+
+## now transform vector of NPP data
+
+npp$disturbance_severity <- as.factor(npp$disturbance_severity)
+npp$treatment <- as.factor(npp$treatment)
+npp$Year <- as.factor(npp$Year)
+npp$Replicate <- as.factor(npp$Replicate)
+npp$log_NPP <- log(npp$Subcanopy_NPP) # log transforming NPP data to deal with skewness
+
+# ## Try the original ANOVA model on log-transformed NPP data
+NPPmodel_aov <- aov(log_NPP ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = npp)
+
+summary(NPPmodel_aov)
+
+## run posthoc, severity:year
+with(npp, LSD.test(log_NPP, disturbance_severity:Year,48,0.286, console = TRUE))
+# with(data, LSD.test(y, x, dferror, MSerror, console = TRUE))
+
+## visualize the subcanopy NPP data
+bpx1 <- npp %>%
+  ggplot(aes(x = disturbance_severity, y = log_NPP, group_by(disturbance_severity), fill = disturbance_severity)) +
+  theme_classic(base_size = 20) +
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab(expression(paste("log ANPP" [w], " ( ",kgC," ",ha^-1," ",year^-1,")"))) +
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) +
+  facet_grid(~Year)
+
+bpx1
+
+```
+
+## Results: NPP vs leaf functional traits
+Finally, I tested subcanopy leaf functional traits for their relationships with subcanopy ANPPw. I began with a series of simple bivariate models (using log subcanopy ANPPw as the outcome) to test each leaf functional trait independently.
+
+
+```{r, echo=FALSE}
+## load npp data and join with functional traits data. All functional traits need to be in same dataframe now.
+# Asat, gs: dataframe "subplot_mean_phys"
+# LMA: dataframe "df2"
+# reNDVI: dataframe "df13"
+
+phys_spec <- left_join(subplot_mean_phys, df13, by = c("Subplot", "Year")) %>%
+  select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
+  rename(treatment = treatment.x,
+         Replicate = Replicate.x,
+         disturbance_severity = disturbance_severity.x)
+
+all_traits_post <- left_join(phys_spec, df2, by = c("Subplot", "Year")) %>%
+  select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
+  rename(treatment = treatment.x,
+         Replicate = Replicate.x,
+         disturbance_severity = disturbance_severity.x) %>%
+  filter(Year != 2018)
+
+traits_npp <- left_join(all_traits_post, npp, by = c("Subplot", "Year")) %>%
+  select(-disturbance_severity.y, -treatment.y, -Replicate.y, -Subplot_mean_Asat.y) %>%
+  rename(treatment = treatment.x,
+         Replicate = Replicate.x,
+         disturbance_severity = disturbance_severity.x,
+         Subplot_mean_Asat = Subplot_mean_Asat.x)
+
+## check relationship between VAI and subcanopy NPP
+# attach VAI to NPP data set
+npp_vai <- left_join(Asat_VAI, npp, by = c("Subplot", "Year")) %>%
+  filter(Year != 2018) %>%
+  select(-disturbance_severity.y, -treatment.y, -Replicate.y, -Subplot_mean_Asat.y) %>%
+  rename(treatment = treatment.x,
+         Replicate = Replicate.x,
+         disturbance_severity = disturbance_severity.x,
+         Subplot_mean_Asat = Subplot_mean_Asat.x)
+
+## visualize NPP-VAI relationship
+pnv <- npp_vai %>%
+  ggplot(aes(x = mean_vai, y = log_NPP, color = Year)) + 
+  theme_classic(base_size = 15) + 
+  geom_point(show.legend = FALSE, size=3) +
+  xlab("Canopy VAI") +
+  ylab("log Subcanopy ANPPw") 
+
+pnv
+
+m_vai_npp <- lm(log_NPP ~ mean_vai*Year, data = npp_vai)
+summary(m_vai_npp) ## no relationship
+
+
+## NPP-VAI LME Model
+lmeNPPVAI <- lmer(log_NPP ~ mean_vai*Year + (1|Replicate), data = npp_vai)
+summary(lmeNPPVAI)
+# show summary
+sjPlot::tab_model(lmeNPPVAI)
+
+
+## first, examine possible relationships between each leaf variable and NPP subcanopy
+# Asat
+p25 <- traits_npp %>%
+  ggplot(aes(x = Subplot_mean_Asat, y = log_NPP, color=Year)) + 
+  theme_classic(base_size = 15) + 
+  geom_point(show.legend = TRUE, size=3) +
+  xlab("Subcanopy Asat") +
+  ylab("log Subcanopy ANPPw") 
+
+p25
+
+m_asat_npp <- lm(log_NPP ~ Subplot_mean_Asat*Year, data = traits_npp)
+summary(m_asat_npp)
+# show summary
+sjPlot::tab_model(m_asat_npp)
+
+# gs 
+p26 <- traits_npp %>%
+  ggplot(aes(x = Subplot_mean_Cond, y = log_NPP, color=Year)) + 
+  theme_classic(base_size = 15) + 
+  geom_point(show.legend = TRUE, size=3) +
+  xlab("Subcanopy gs") +
+  ylab("log Subcanopy ANPPw") 
+
+p26
+
+m_cond_npp <- lm(log_NPP ~ Subplot_mean_Cond*Year, data = traits_npp)
+summary(m_cond_npp)
+# show summary
+sjPlot::tab_model(m_cond_npp)
+
+# LMA 
+p27 <- traits_npp %>%
+  ggplot(aes(x = mean_lma, y = log_NPP, color=Year)) + 
+  theme_classic(base_size = 15) + 
+  geom_point(show.legend = TRUE, size=3) +
+  xlab("Subcanopy LMA") +
+  ylab("log Subcanopy ANPPw") 
+
+p27
+
+m_lma_npp <- lm(log_NPP ~ mean_lma*Year, data = traits_npp)
+summary(m_lma_npp)
+# show summary
+sjPlot::tab_model(m_lma_npp)
+
+# reNDVI
+p28 <- traits_npp %>%
+  ggplot(aes(x = mean_rendvi, y = log_NPP, color=Year)) + 
+  theme_classic(base_size = 15) + 
+  geom_point(show.legend = TRUE, size=3) +
+  xlab("Subcanopy reNDVI") +
+  ylab("log Subcanopy ANPPw") 
+
+p28
+
+m_rendvi_npp <- lm(log_NPP ~ mean_rendvi*Year, data = traits_npp)
+summary(m_rendvi_npp)
+# show summary
+sjPlot::tab_model(m_rendvi_npp)
+
+
+## run full analysis WITH interactions between each leaf trait and year
+lmeNPPtraitsInt <- lmer(log_NPP ~ Subplot_mean_Asat*Year + Subplot_mean_Cond*Year + mean_lma*Year + mean_rendvi*Year + Year + (1|Replicate), data = traits_npp)
+summary(lmeNPPtraitsInt)
+
+## all leaf traits, additive only (no interactions)
+lmeNPPtraits1 <- lmer(log_NPP ~ Subplot_mean_Asat + Subplot_mean_Cond + mean_lma + mean_rendvi + Year + (1|Replicate), data = traits_npp)
+summary(lmeNPPtraits1)
+
+lmeNPPtraits2 <- lmer(log_NPP ~ Subplot_mean_Asat + Subplot_mean_Cond + mean_rendvi + Year + (1|Replicate), data = traits_npp)
+summary(lmeNPPtraits2)
+
+lmeNPPtraits3 <- lmer(log_NPP ~ Subplot_mean_Cond + mean_rendvi + Year + (1|Replicate), data = traits_npp)
+summary(lmeNPPtraits3)
+
+```
+
+## Conclusions O2.3 (so far...)
+Though disturbance was found to influence both canopy VAI and subcanopy ANPPw, VAI was not in turn found to relate to subcanopy ANPPw. This is likely due to the lagged impact of disturbance on VAI, such that it took three years for effects to start manifesting. This also points to the importance of looking for other mechanisms (beyond canopy structure) to explain the more rapid response of subcanopy ANPPw to disturbance (which was already responding significantly in the second year, before VAI). Cue leaf traits!!
+
+I am still working through model selection for this part of the analysis, but have found some interesting results so far. In the model including all leaf functional traits (Asat, gs, LMA, and reNDVI) AND their respective interactions with year, only LMA*Year emerged as significant. However, in a model with all leaf traits but WITHOUT their interactions with Year, reNDVI emerged as significant at alpha=0.1 (p = 0.06) as well as Year (p < 0.5). In subsequent linear mixed effects models removing insignificant leaf functional trait terms of LMA and Asat, reNDVI's p value dropped to become significant.

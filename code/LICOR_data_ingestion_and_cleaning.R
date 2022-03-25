@@ -138,14 +138,19 @@ nrow(licordata2018_means)#390 trees represented in the data set; 2 excluded by n
 ### 4: time to add the covered IRGA area for leaves. LI-6400 assumes 2x3 cm2 coverage at IRGA mouth but some needle-leaf specimens were measured, and their measurements will have to be scaled accordingly
 
 # bring in the 2018 leaf morphology data set
-morph2018 <- read.csv("data/leaf_morphology/FoRTE_subcanopy_leaf_morphology_2018.csv") 
+morph2018 <- read.csv("data/leaf_morphology/FoRTE_subcanopy_leaf_morphology_2018.csv") %>%
+  as_tibble()
 
 # join to LICOR data
 morph2018 <- morph2018 %>%
+  rename(final_ID = tag_number) %>%
   select(final_ID, IRGA_covered_area, Asat_multiplier)
   
 scaled_licordata_2018 <- left_join(licordata2018_cleaned, morph2018, by = "final_ID") %>%
-  select(-Filename_date)
+  select(-Filename_date) %>%
+  mutate(girdled = "n") %>%
+  select(-girdled.) %>%
+  rename(girdled. = girdled)
 
 # write.csv(scaled_licordata_2018, "data/cleaned_data_for_analyses/LICOR_leaf_phys_2018.csv", row.names = FALSE)
 

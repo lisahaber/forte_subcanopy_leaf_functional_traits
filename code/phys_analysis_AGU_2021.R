@@ -1,12 +1,13 @@
 ###########################################################################
 ## Lisa T. Haber                                                         ##
-## November 2021                                                         ##
+## November - December 2021                                              ##
 ## FoRTE Subcanopy Leaf Functional Traits Manuscript Prep                ##
 ## 2018-2021 data analysis                                               ##
 ###########################################################################
 
 ## This code will use cleaned FoRTE subcanopy physiology data for preliminary analysis.
 ## The immediate goal is preparation for AGU 2021.
+## Only Asat analysis was included in prep for AGU 2021; other leaf functional traits added later.
 ## The principle analyses here will be ANOVA/mixed models..... refer to proposal!!!
 
 ## load required packages
@@ -26,8 +27,9 @@ d2021 <- read.csv("data/cleaned_data_for_analyses/LICOR_leaf_phys_2021.csv") %>%
 ## get rid of negative Asat values and create means for individual leaves from 5 observations per leaf
 Asat2018 <- d2018 %>%
   group_by(Filename) %>%
-  mutate(MeanPhoto = mean(Photo)) %>%
-  filter(MeanPhoto >= 0)
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
+  filter(MeanPhoto >= 0) ## note that 2018 has some negative values for MeanCond. These will need to be zero'ed out during scaling.
 
 # Filename column in 2019 data is a numeric vector rather than character, so need to convert
 ## all dataframes from 2019, 2020, 2021 need to be cleaned of any trees that were girdled in early 2019
@@ -35,19 +37,22 @@ d2019$Filename <- as.character(d2019$Filename)
 
 Asat2019 <- d2019 %>%
   group_by(Filename) %>%
-  mutate(MeanPhoto = mean(Photo)) %>%
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
   filter(MeanPhoto >= 0,
          girdled. == "n")
 
 Asat2020 <- d2020 %>%
   group_by(Filename) %>%
-  mutate(MeanPhoto = mean(Photo)) %>%
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
   filter(MeanPhoto >= 0,
          girdled. == "n")
 
 Asat2021 <- d2021 %>%
   group_by(Filename) %>%
-  mutate(MeanPhoto = mean(Photo)) %>%
+  mutate(MeanPhoto = mean(Photo),
+         MeanCond = mean(Cond)) %>%
   filter(MeanPhoto >= 0,
          girdled. == "n")
 
@@ -76,17 +81,19 @@ treatments1 <- treatments %>%
 
 df <- left_join(alldata, treatments1, by = "Subplot")
 
-## REMEMBER that you have to SCALE for your Asat values for pines. This means you need a new, final_Asat column
+## REMEMBER that you have to SCALE for your Asat values for pines. This means you need a new, Scaled_Asat column
 df <- df %>%
-  mutate(Scaled_Asat = MeanPhoto*Asat_multiplier)
+  mutate(Scaled_Asat = MeanPhoto*Asat_multiplier,
+         Scaled_Cond = MeanCond*Asat_multiplier)
 
 # check the range of values -- some are definitely going to be outliers
 # this is mostly due to inaccuracies in pine needle area measurement and subsequent scaling for gas exchange values measured by IRGA
 range(df$Scaled_Asat, na.rm=TRUE)
+range(df$Scaled_Cond, na.rm=TRUE)
 
-na <- which(is.na(df$Scaled_Asat))
-tibble::view(na)
-tibble::view(df)
+# na <- which(is.na(df$Scaled_Asat))
+# tibble::view(na)
+# tibble::view(df)
 
 # check for number of values in excess of 25 umol/m2/sec. This would be a very high value for a full-sun aspen, maybe a good benchmark for maximum possible rate
 
@@ -94,7 +101,7 @@ length(df$Scaled_Asat[df$Scaled_Asat > 25]) # 40 measurements (8 trees over time
 
 outliers <- df %>%
   filter(Scaled_Asat > 18) %>%
-  select(Obs, Photo, Filename, Species, girdled., Year, IRGA_covered_area, Asat_multiplier, MeanPhoto, Scaled_Asat)
+  select(Obs, Photo, Filename, Species, girdled., Year, IRGA_covered_area, Asat_multiplier, MeanPhoto, Scaled_Asat, Scaled_Cond)
 
 unique(outliers$Species) # it is only pire and pist that have extremely high values in the data set
 #amel also has high values but I have reason to believe those are ecologically valid/meaningful
@@ -105,7 +112,7 @@ amel <- df %>%
   group_by(Filename) %>%
   summarize(MeanPhoto = MeanPhoto)
 
-tibble::view(amel)
+# tibble::view(amel)
 
 # highest value for amel was in 2020, 17.34 umol/m2/sec. So, 18 seems reasonable threshold.
 
@@ -119,7 +126,19 @@ tibble::view(amel)
 
 df1 <- df %>%
   na.omit() %>%
-  filter(Scaled_Asat < 18)
+  filter(Scaled_Asat < 18) #This outlier filtering also appears to have removed impossibly high Scaled_Cond values; hooray!
+
+## still need to deal with the negative values for Scaled_Cond -- set them equal to zero
+range(df1$Scaled_Cond)
+length(df1$Scaled_Cond[df1$Scaled_Cond < 0])
+
+outliers1 <- df1 %>%
+  filter(Scaled_Cond < 0) %>%
+  select(Obs, Photo, Filename, Species, girdled., Year, IRGA_covered_area, Asat_multiplier, MeanPhoto, Scaled_Asat, Scaled_Cond)
+tibble::view(outliers1) ## it is only a subset of 18 trees, all pist & pire, all from 2018 with negative Scaled_Cond values. Need to set these values equal to zero.
+
+df1$Scaled_Cond[df1$Scaled_Cond < 0] <- 0 #setting all negative scaled conductivity values equal to zero.
+
 
 
 ## visualize overall samples
@@ -141,9 +160,10 @@ p2 <- ggplot(df1, aes(x=Scaled_Asat)) +
 ## getting data summarized by subplot, year
 
 subplot_mean_phys <- df1 %>%
-  select(Cond, Filename, Species, Subplot, final_ID, Year, disturbance_severity, treatment, Asat_multiplier, Scaled_Asat) %>%
+  select(Cond, Filename, Species, Subplot, final_ID, Year, disturbance_severity, treatment, Asat_multiplier, Scaled_Asat, Scaled_Cond) %>%
   group_by(Year, Subplot) %>%
-  summarize(Subplot_mean_Asat = mean(Scaled_Asat))
+  summarize(Subplot_mean_Asat = mean(Scaled_Asat),
+            Subplot_mean_Cond = mean(Scaled_Cond))
 
 subplot_mean_phys <- left_join(subplot_mean_phys, treatments1, by = "Subplot")
 
@@ -173,7 +193,22 @@ bp1 <- subplot_mean_phys %>%
   scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
   facet_grid(~Year)
 
-bp1
+bp1 #subplot mean Asat, all years
+
+
+bp2 <- subplot_mean_phys %>%
+  ggplot(aes(x = disturbance_severity, y = Subplot_mean_Cond, group_by(disturbance_severity), fill = disturbance_severity)) + 
+  theme_classic(base_size = 13) + 
+  geom_boxplot(show.legend = FALSE) +
+  xlab("Severity (% Gross Defoliation)") +
+  ylab('Subcanopy CWM leaf stomatal conductance (mol/m2/s)') + 
+  scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
+  facet_grid(~Year)
+
+bp2 #subplot mean Asat, all years
+
+
+
 
 ################ Analysis 02.1 #################################################
 ##### Split-split plot ANOVA
@@ -230,6 +265,12 @@ with(subplot_mean_phys, LSD.test(Subplot_mean_Asat, disturbance_severity:Year,72
 # with(data, LSD.test(y, x, dferror, MSerror, console = TRUE))
 
 ## total agreement between both models! That's a good sign...
+
+###### Stomatal conductance:
+
+Condmodel <- aov(Subplot_mean_Cond ~ disturbance_severity*treatment*Year + Error(Replicate/disturbance_severity/treatment/Year), data = subplot_mean_phys)
+
+summary(Condmodel)
 
 ################ Analysis 02.2 #################################################
 ## Part 1: same analysis as above, but using VAI as outcome variable. Need VAI in all years
