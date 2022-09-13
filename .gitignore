@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+# ignore raw data files stored locally during project execution; these raw data files are backed up to Gough Lab/FoRTE drive 
+# and can be accessed through fortedata R package if needed (Atkins et al. 2021; https://essd.copernicus.org/articles/13/943/2021/)
+data/CID_*
+data/LICOR_*
