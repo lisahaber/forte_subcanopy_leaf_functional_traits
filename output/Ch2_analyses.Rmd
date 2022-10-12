@@ -138,20 +138,6 @@ subplot_mean_phys$Replicate <-
 ## make severity a factor!!!!
 subplot_mean_phys$disturbance_severity <- as.factor(subplot_mean_phys$disturbance_severity)
 
-# bp1 <- subplot_mean_phys %>%
-#   ggplot(aes(x = disturbance_severity, y = Subplot_mean_Asat, group_by(disturbance_severity), fill = disturbance_severity)) + 
-#   theme_classic(base_size = 20) + 
-#   geom_boxplot(show.legend = FALSE) +
-# 
-#   labs(y=expression(paste(" ",Subcanopy," ",CWM," ",Leaf," ",Photosynthetic," ,\n, ",Rate," (",mu*molCO[2],"  ",m^-2,"  ",sec^-1,")")),
-#        x=expression(paste(" ",Severity," (",Percent," ",Gross," ",Defoliation,")"))) +
-#   # xlab("Severity (% Gross Defoliation)") +
-#   # ylab("Subcanopy CWM leaf photosynthetic\nrate ( mu*molCO[2] m^-2 sec^-1)") +
-#   scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) +
-#   facet_grid(~Year)
-# 
-# bp1 #subplot mean Asat, all years
-
 bp1 <- subplot_mean_phys %>%
   ggplot(aes(x = disturbance_severity, y = Subplot_mean_Asat, group_by(disturbance_severity), fill = disturbance_severity)) + 
   theme_classic(base_size = 20) + 
@@ -300,7 +286,7 @@ treatments <- treatments %>%
 
 ## now join to treatments data
 treatments1 <- treatments %>%
-  select(Subplot, disturbance_severity, treatment)
+  dplyr::select(Subplot, disturbance_severity, treatment)
 
 # no_pines <- morph %>%
 #   filter(Species != "pist") %>%
@@ -804,7 +790,7 @@ We will need to use linear mixed effects models here. Grouping variable is the r
 library(fortedata)
 
 VAI_subplot_3yrs <- fortedata::fd_canopy_structure() %>%
-  select(subplot_id, replicate, year, plot, subplot, vai_mean) %>%
+  dplyr::select(subplot_id, replicate, year, plot, subplot, vai_mean) %>%
   group_by(year, replicate, plot, subplot) %>%
   summarize(mean_vai = mean(vai_mean)) %>%
   mutate(Zero = "0")
@@ -816,7 +802,7 @@ VAI_subplot_3yrs <- VAI_subplot_3yrs %>%
 
 # now bring in 2021 data from Kerstin N
 VAI_subplot_2021 <- read.csv("C:/github/forte_subcanopy_leaf_functional_traits/data/umbs_pcl_2021.csv") %>%
-  select(Subplot, vai.mean) %>%
+  dplyr::select(Subplot, vai.mean) %>%
   mutate(year = 2021) %>%
   group_by(Subplot, year) %>%
   summarize(mean_vai = mean(vai.mean))
@@ -830,7 +816,7 @@ VAI_all_years <- rbind(VAI_subplot_3yrs, VAI_subplot_2021) %>%
 VAI_all_years$Year <- as.factor(VAI_all_years$Year)
 Asat_VAI <- left_join(subplot_mean_phys, VAI_all_years, by = c("Subplot", "Year")) 
 
-# look at trends in VAI over time
+# look at trends in VAI over time; this figure formatted for addition to fPAR/VAI combo figure in manuscript
 bp7 <- Asat_VAI %>%
   ggplot(aes(x = disturbance_severity, y = mean_vai, group_by(disturbance_severity), fill = disturbance_severity)) + 
   theme_classic(base_size = 20) + 
@@ -838,8 +824,9 @@ bp7 <- Asat_VAI %>%
   xlab("Severity (% Gross Defoliation)") +
   ylab("VAI (unitless)") + 
   scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) + 
-  facet_grid(~Year) + 
-  theme(strip.text = element_blank(), plot.margin = unit(c(1,3,3,3), units = "pt"))
+  facet_grid(~Year) +
+  theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), 
+        plot.margin = unit(c(3,3,0.5,3), units = "pt"))
 
 bp7 
 
@@ -848,6 +835,7 @@ bp7
 VAImodel1 <- lmer(mean_vai ~ disturbance_severity*Year + (1|Replicate), data = Asat_VAI)
 summary(VAImodel1) # Model 1 includes interaction of disturbance severity and year, similar to ANOVA used for 02.1. This will treat both disturbance and year as fixed effects while replicate is a random effect.
 AIC(VAImodel1)
+AICc(VAImodel1)
 require(lmerTest)
 e <- effects::allEffects(VAImodel1)
 plot(e)
@@ -869,9 +857,11 @@ plot(e)
 # Model 5 includes treatment and disturbance as fixed effects, year and replicate as nested (year within replicate) random effects.
 # Model 5 runs but isn't super useful since treatment was not important in any earlier models and isn't significant here, either.
 
-# VAImodel6 <- lmer(mean_vai ~ disturbance_severity*treatment*Year + (1|Replicate), data = Asat_VAI)
-# summary(VAImodel6) ## treatment and its interactions are all non-significant, so remove from model and use simpler model structure
-# AIC(VAImodel6) ## Model 6: Three-way interactions of disturbance severity, treatment type, and year included. No significant main effects and only the two-way interaction of disturbance:year (85:2021) was significant (p < 0.05). Once again, treatment is NOT significant so it can be removed from the analysis.
+VAImodel6 <- lmer(mean_vai ~ disturbance_severity*treatment*Year + (1|Replicate), data = Asat_VAI)
+summary(VAImodel6) ## treatment and its interactions are all non-significant, so remove from model and use simpler model structure
+AIC(VAImodel6) ## Model 6: Three-way interactions of disturbance severity, treatment type, and year included. No significant main effects and only the two-way interaction of disturbance:year (85:2021) was significant (p < 0.05). Once again, treatment is NOT significant so it can be removed from the analysis.
+AICc(VAImodel6)
+sjPlot::tab_model(VAImodel6)
 
 # VAImodel7 <- lmer(mean_vai ~ disturbance_severity*treatment + (1|Replicate) + (1|Year), data = Asat_VAI)
 # summary(VAImodel7)
@@ -1315,6 +1305,20 @@ rendvi1_plot <- ggplot(RENDVI_VAI, aes(x = mean_vai, y = mean_rendvi, colour = Y
 
 rendvi1_plot
 
+## plot without the interactions for 2018 and 2020, since these had confidence intervals overlapping zero 
+rendvi2_plot <- ggplot(RENDVI_VAI, aes(x = mean_vai, y = mean_rendvi, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 20) +
+  theme(legend.position = "none") +
+      geom_smooth(data = cbind(RENDVI_VAI, pred = predict(lmeRENDVIVAI2)), aes(y = pred, linetype = Year), method=lm, size = 1.5, na.rm=TRUE, se=FALSE) + # adding predicted line from mixed model  
+  scale_linetype_manual(values=c("blank", "solid", "blank", "blank")) +
+  labs(y="reNDVI (unitless)",
+       x=expression(paste(" ",Canopy," ",VAI," ",(unitless),""))) +
+  scale_fill_viridis_c()  
+
+
+rendvi2_plot
+
 ## try for years only:
 effects_rendvi_year <- effects::effect(term= "Year", mod= lmeRENDVIVAI2)
 summary(effects_rendvi_year)
@@ -1431,20 +1435,20 @@ Finally, I tested subcanopy leaf functional traits for their relationships with 
 # reNDVI: dataframe "df13"
 
 phys_spec <- left_join(subplot_mean_phys, df13, by = c("Subplot", "Year")) %>%
-  select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
+  dplyr::select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
   rename(treatment = treatment.x,
          Replicate = Replicate.x,
          disturbance_severity = disturbance_severity.x)
 
 all_traits_post <- left_join(phys_spec, df2, by = c("Subplot", "Year")) %>%
-  select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
+  dplyr::select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
   rename(treatment = treatment.x,
          Replicate = Replicate.x,
          disturbance_severity = disturbance_severity.x) %>%
   filter(Year != 2018)
 
 traits_npp <- left_join(all_traits_post, npp, by = c("Subplot", "Year")) %>%
-  select(-disturbance_severity.y, -treatment.y, -Replicate.y, -Subplot_mean_Asat.y) %>%
+  dplyr::select(-disturbance_severity.y, -treatment.y, -Replicate.y, -Subplot_mean_Asat.y) %>%
   rename(treatment = treatment.x,
          Replicate = Replicate.x,
          disturbance_severity = disturbance_severity.x,
@@ -1454,7 +1458,7 @@ traits_npp <- left_join(all_traits_post, npp, by = c("Subplot", "Year")) %>%
 # attach VAI to NPP data set
 npp_vai <- left_join(Asat_VAI, npp, by = c("Subplot", "Year")) %>%
   filter(Year != 2018) %>%
-  select(-disturbance_severity.y, -treatment.y, -Replicate.y, -Subplot_mean_Asat.y) %>%
+  dplyr::select(-disturbance_severity.y, -treatment.y, -Replicate.y, -Subplot_mean_Asat.y) %>%
   rename(treatment = treatment.x,
          Replicate = Replicate.x,
          disturbance_severity = disturbance_severity.x,
@@ -1599,10 +1603,31 @@ model <- buildlme(Subcanopy_NPP ~ Subplot_mean_Asat + Subplot_mean_Cond + mean_l
 summary(model)
 AICc(model)
 
-lmNPPtraits <- lm(log_NPP ~ Subplot_mean_Asat + Subplot_mean_Cond + mean_rendvi + trans_lma + Replicate, data = traits_npp_lmatrans)
+lmNPPtraits <- lm(log_NPP ~ Subplot_mean_Asat + Subplot_mean_Cond + mean_rendvi + trans_lma + Replicate , data = traits_npp_lmatrans)
 summary(lmNPPtraits)
 AIC(lmNPPtraits)
-AICc(lmNPPtraits) # 
+AICc(lmNPPtraits) # 309.85
+
+## to get intermediary models' values for supp table 8:
+# row one: full model 
+lmNPPtraits <- lm(log_NPP ~ Subplot_mean_Asat + Subplot_mean_Cond + mean_rendvi + trans_lma + Replicate , data = traits_npp_lmatrans)
+summary(lmNPPtraits)
+AIC(lmNPPtraits)
+AICc(lmNPPtraits)
+
+# row 2: first reduced model 
+lm2 <- lm(log_NPP ~ Subplot_mean_Asat + Subplot_mean_Cond + mean_rendvi + 
+    Replicate, data = traits_npp_lmatrans)
+summary(lm2)
+AICc(lm2)
+
+lm3 <- lm(log_NPP ~ Subplot_mean_Asat + mean_rendvi + Replicate, data= traits_npp_lmatrans)
+summary(lm3)
+AICc(lm3)
+
+lm4 <- lm(log_NPP ~ mean_rendvi + Replicate, data = traits_npp_lmatrans)
+summary(lm4)
+AICc(lm4)
 
 require(MASS)
 stepAIC(lmNPPtraits, direction = "both")
@@ -1622,7 +1647,7 @@ lmNPPFINAL1 <- lm(log_NPP ~ mean_rendvi + disturbance_severity + Year +
 summary(lmNPPFINAL1)
 AICc(lmNPPFINAL1) #283.606
 
-### post hoc analysis
+cita### post hoc analysis
 require(emmeans)
 post_hoc_regression_rendvi_npp <- emmeans(lmNPPFINAL1, pairwise ~ mean_rendvi:disturbance_severity)
 summary(post_hoc_regression_rendvi_npp)
@@ -1690,20 +1715,22 @@ fun.1 <- function(x) exp(0.802097 + 12.295984*x + 1.6804e-17)
 
 npp_rendvi_plot <- traits_npp %>%
   ggplot(aes(x = mean_rendvi, y = Subcanopy_NPP, color=Year)) +
-  scale_color_manual(values = c("2019" = "#7CAE00", 
+  scale_color_manual(values = c("2019" = "#7CAE00", # lets you specify colors for points - -this will assign to years since that is the grouping you specified in the aes() call above
                                "2020" = "#00BFC4", 
                                "2021" = "#C77CFF")) +
   guides(color = guide_legend(override.aes = list(size = 3) ) ) +
   geom_point(aes(shape = disturbance_severity), size=3) + 
-  scale_shape_discrete(name = "Disturbance Severity (%)",
+  scale_shape_discrete(name = "Disturbance Severity (%)", # lets you add shapes to your points
                         breaks = c(0, 45, 65, 85),
                         labels = c("0", "45", "65", "85")) +
   guides(shape = guide_legend(override.aes = list(size = 3) ) ) +
   theme_classic(base_size = 15) +
-  xlab("Subcanopy reNDVI") +
-  ylab("Subcanopy ANPPw") +
+  xlab("Subcanopy CWM reNDVI") +
+  ylab(expression(paste("Subcanopy ANPP" [w], " (",kg," ",C," ",ha^-1," ",year^-1,")"))) +
   geom_function(fun = fun.1, show.legend = FALSE, color = "black", size = 1) +
-  theme(legend.position = "right")
+  theme(legend.position = c(0.03, 0.9999),
+        legend.justification = c("left", "top"),
+        legend.spacing.y = unit(0.02, 'cm'))
 
 npp_rendvi_plot
 
@@ -1826,10 +1853,10 @@ bpx4 <- NPP_all %>%
   theme(legend.position = 'none') +
   geom_boxplot(aes(x = disturbance_severity, y = total_NPP, fill = disturbance_severity, show.legend=FALSE, alpha=0.15)) +
   geom_boxplot(aes(x = disturbance_severity, y = Subcanopy_NPP, fill = disturbance_severity, show.legend=FALSE)) +
-  xlab("Severity (% Gross Defoliation)") +
-  ylab(expression(paste("ANPP" [w], " (",kg," ",C," ",ha^-1," ",year^-1,")"))) +
+  xlab("Severity (% Gross Defoliation)") + # x axis label
+  ylab(expression(paste("ANPP" [w], " (",kg," ",C," ",ha^-1," ",year^-1,")"))) + # y axis label
   scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) +
-  facet_grid(~Year)
+  facet_grid(~Year) # this lets you make separate panels for each year
 
 bpx4
 
@@ -1909,6 +1936,20 @@ summary(lm(fapar ~ openness, data = df))
 summ2 <- summary(lm(fapar ~ gap_fraction, data = df))
 mean(summ2$residuals)
 
+##### cleaned up figure for supp doc (Fig S1):
+
+df <- df %>%
+  mutate(gap_frac = gap_fraction/100)
+
+fpar_gap <- ggplot(df, aes(x = gap_frac, y = fapar)) +
+  geom_point(size = 3.5) + 
+  theme_classic(base_size = 20) + 
+  geom_smooth(method = 'lm', se = FALSE) + 
+  xlab("Gap Fraction (unitless)") + 
+  ylab("fPAR (unitless)") + 
+  annotate("text", x=0.15, y= 0.95, label= "y = -0.017x + 1.025", size=8) 
+  
+fpar_gap
 ```
 # Updating manuscript draft with fPAR data
 Linear mixed effects model was used to assess changes in fPAR with rising disturbance severity and over time (same as with VAI). Given that fPAR follows an extremely skewed distribution, 
@@ -2024,8 +2065,8 @@ bpx6 <- df_fpar %>%
   ylab("fPAR (unitless)") +
   scale_fill_manual(values = c("#000000", "#009E73", "#0072B2", "#D55E00")) +
   facet_grid(~year) +
-  theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), 
-        plot.margin = unit(c(3,3,1,3), units = "pt"))
+  theme(strip.text = element_blank(), plot.margin = unit(c(0.5,3,3,3), units = "pt"))
+  
 
 bpx6
 
@@ -2081,6 +2122,14 @@ summary(fparmodel)
 ## LME for fPAR (USE THIS, keep consistent with VAI)
 fPARmodel1 <- lmer(fpar ~ disturbance_severity*year + (1|Replicate), data = df_fpar)
 summary(fPARmodel1) # Model 1 includes interaction of disturbance severity and year, similar to ANOVA used for 02.1. This will treat both disturbance and year as fixed effects while replicate is a random effect.
+sjPlot::tab_model(fPARmodel1)
+AICc(fPARmodel1)
+
+fPARmodelFULL <- lmer(fpar ~ disturbance_severity*treatment*year + (1|Replicate), data = df_fpar)
+summary(fPARmodelFULL) ## treatment and its interactions are all non-significant, so remove from model and use simpler model structure
+AIC(fPARmodelFULL) ## Model 6: Three-way interactions of disturbance severity, treatment type, and year included. No significant main effects and only the two-way interaction of disturbance:year (85:2021) was significant (p < 0.05). Once again, treatment is NOT significant so it can be removed from the analysis.
+AICc(fPARmodelFULL)
+sjPlot::tab_model(fPARmodelFULL)
 
 ## post-hoc analysis, fPAR
 # note that values in the test come from the summary ANOVA table generated in previous step
@@ -2092,7 +2141,8 @@ with(df_fpar, LSD.test(fpar, disturbance_severity:year,72,0.00192, alpha = 0.05,
 # bp7 from section 02.1 is the VAI figure
 # bpx6 is the fPAR figure
 library(ggpubr)
-fparvai <- ggarrange(bpx6 + rremove("x.text"), bp7,
+
+fparvai <- ggarrange(bp7 + rremove("x.text"), bpx6,
           labels = c("A", "B"),
           ncol = 1, nrow = 2,
           align = "hv")
@@ -2100,7 +2150,7 @@ fparvai <- ggarrange(bpx6 + rremove("x.text"), bp7,
 fparvai
 ```
 
-Get a cleaned up summary of the landscape ecosystem types pre-disturbance CWM values for leaf traits.
+Get a cleaned up summary of the landscape ecosystem types pre-disturbance CWM values for leaf traits & VAI.
 ```{r}
 # load data frames
 require(tidyverse)
@@ -2121,5 +2171,165 @@ phys_spec %>%
             mean_re = mean(mean_rendvi),
             se_rendvi = sd(mean_rendvi)/sqrt(8)) %>%
   print()
+
+require(fortedata)
+## computing standard errors on this data set is complicated by missing subplots in 2018, so need to compute each rep differently
+# A: 18 observations, B: 12, C: 17, D: 20
+vairep <- fortedata::fd_canopy_structure() %>%
+  filter(year == 2018) %>%
+  dplyr::select(subplot_id, replicate, year, plot, subplot, vai_mean) %>%
+  group_by(replicate) %>%
+  summarize(n = n(),
+    mean_vai = mean(vai_mean),
+    se = sd(vai_mean)/sqrt(n)) 
+
+vairep
+
+```
+
+# Trying trait relationships with fPAR instead of VAI...manuscript figure ship-shaping
+Significant contrasts found:
+Asat vs. fPAR: 2018 does not have a significant interaction, but each subsequent year is significant and significantly different from 2018. 2019 and 2020 are not significantly different. 2021 is significantly different from both 2019 and 2020.
+```{r}
+# fpar data in this dataframe: "df_fpar"
+# trait data in several earlier df's: "phys_spec" contains everything but LMA; LMA in "df2"
+traits_all <- left_join(phys_spec, df2, by = c("Subplot", "Year")) %>%
+  dplyr::select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
+  rename(treatment = treatment.x,
+         Replicate = Replicate.x,
+         disturbance_severity = disturbance_severity.x) 
+df_fpar <- df_fpar %>%
+  rename(Year = year)
+
+traits_fpar <- left_join(traits_all, df_fpar, by = c("Subplot", "Year")) %>%
+  dplyr::select(-disturbance_severity.y, -treatment.y, -Replicate.y) %>%
+  rename(treatment = treatment.x,
+         Replicate = Replicate.x,
+         disturbance_severity = disturbance_severity.x)
+
+## now try same analyses as conducted earlier with traits & VAI and graph
+# asat model
+lmeAsatfpar <- lmer(Subplot_mean_Asat ~ fpar*Year + (1|Replicate), data = traits_fpar)
+summary(lmeAsatfpar)
+# preliminary asat graph
+asat_fpar_p <- ggplot(traits_fpar, aes(x = fpar, y = Subplot_mean_Asat, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 13) +
+      geom_smooth(data = cbind(traits_fpar, pred = predict(lmeAsatfpar)), aes(y = pred), method=lm, size = 1, na.rm=TRUE, se=FALSE) +  # adding predicted line from mixed model 
+  xlab("fPAR (unitless)") +
+  ylab('Subcanopy CWM leaf photosynthetic rate (' *mu~ 'mol' ~CO[2]~ m^-2~s^-1*')')
+asat_fpar_p
+
+## check differences in slopes
+## significant interactions for: 2019, 2020, 2021
+require(emmeans)
+post_hoc_regression_asat_fpar <- emmeans(lmeAsatfpar, pairwise ~ fpar*Year)
+summary(post_hoc_regression_asat_fpar)
+
+## 2019 and 2020 are significant interactions but not significantly different from one another. So, try subsetting data to just those years and repeat model, use THAT model's slope and intercept (no interactions, just main effects) for the line for 2019 and 2020
+traits_fpar_2019and2020 <- traits_fpar %>%
+  filter(Year == 2019 | Year == 2020)
+# repeat model with just these years
+lmeAsatfpar_2019and2020 <- lmer(Subplot_mean_Asat ~ fpar + (1|Replicate), data = traits_fpar_2019and2020)
+summary(lmeAsatfpar_2019and2020) #intercept: 11.322, slope: -6.426
+
+##Final Asat vs. fPAR graph:
+Asat_fpar_plot_final <- ggplot(traits_fpar, aes(x = fpar, y = Subplot_mean_Asat, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 20) +
+  theme(legend.position = "none") + 
+  geom_abline(slope = -6.426,
+              intercept = 11.322, size=1.5, color="black") +
+      geom_smooth(data = cbind(traits_fpar, pred = predict(lmeAsatfpar)), aes(y = pred, linetype = Year), method=lm, size = 1.5, na.rm=TRUE, se=FALSE) + # adding predicted line from mixed model  
+  scale_linetype_manual(values=c("blank", "blank", "blank", "solid")) +
+ labs(y=expression(atop("Light-Saturated Photosynthetic",
+                         "Rate (\u00b5mol CO\u2082/m\u00b2/sec\u00b9)")),
+       x=expression("fPAR (unitless)"))  +
+  scale_y_continuous(position = "right") +
+  scale_fill_viridis_c() 
+   
+
+Asat_fpar_plot_final
+
+
+
+# gs model
+lmegsfpar <- lmer(Subplot_mean_Cond ~ fpar*Year + (1|Replicate), data = traits_fpar)
+summary(lmegsfpar)
+# gs graph
+gs_fpar_p <- ggplot(traits_fpar, aes(x = fpar, y = Subplot_mean_Cond, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 20) +
+  theme(legend.position = "none") +
+      geom_smooth(data = cbind(traits_fpar, pred = predict(lmegsfpar)), aes(y = pred, linetype = Year), method='lm', level=0.95, size = 1.5, se = FALSE, na.rm=TRUE) +  # adding predicted line from mixed model 
+  scale_linetype_manual(values = c(0, 0, 0, 1)) +
+  labs(y=expression(atop("Stomatal Conductance",
+                         "(mol CO\u2082/m\u00b2/sec\u00b9)")),
+       x=expression(paste("",fPAR," ",(unitless),""))) +
+  scale_y_continuous(position = "right")
+ 
+gs_fpar_p
+
+
+
+## lma model
+lmeLMAfpar <- lmer(mean_lma ~ fpar*Year + (1|Replicate), data = traits_fpar)
+summary(lmeLMAfpar)
+
+lma_fpar_p <- ggplot(traits_fpar, aes(x = fpar, y = mean_lma)) +
+  geom_smooth(method='lm', level=0.95, size = 1.5, se = FALSE, na.rm=TRUE, color= "black") +
+      geom_point(aes(color = Year), size = 2.5) +
+      theme_classic(base_size = 20) +
+  theme(legend.position = "none") +
+  scale_linetype_manual(values = c(0, 0, 0, 1)) +
+  xlab("fPAR (unitless)") +
+  ylab("Leaf Mass per Area (g/m\u00b2)") +
+  scale_y_continuous(position = "right")
+
+lma_fpar_p  ## check -- why is line printing in the same color as 2021 data?
+
+## rendvi model
+lmeRENDVIfpar <- lmer(mean_rendvi ~ fpar*Year + (1|Replicate), data = traits_fpar)
+summary(lmeRENDVIfpar) 
+## check differences in slopes
+## significant interactions for: 2019, 2020
+require(emmeans)
+post_hoc_regression_rendvi_fpar <- emmeans(lmeRENDVIfpar, pairwise ~ fpar*Year)
+summary(post_hoc_regression_rendvi_fpar)
+
+# rendvi graph
+rendvi_fpar_p <- ggplot(traits_fpar, aes(x = fpar, y = mean_rendvi, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 13) +
+      geom_smooth(data = cbind(traits_fpar, pred = predict(lmeRENDVIfpar)), aes(y = pred), method=lm, size = 1, na.rm=TRUE, se=FALSE) +  # adding predicted line from mixed model 
+  xlab("fPAR (unitless)") +
+  ylab('Subcanopy CWM reNDVI') +
+  scale_y_continuous(position = "right")
+
+rendvi_fpar_p
+
+## 2018 and 2020 are significant interactions but not significantly different from one another (both, however, significantly different from 2019). So, try subsetting data to just 2018 and 2020, and repeat model, use THAT model's slope and intercept (no interactions, just main effects) for the line for 2018 and 2020
+traits_fpar_2018and2020 <- traits_fpar %>%
+  filter(Year == 2018 | Year == 2020)
+# repeat model with just these years
+lmeRENDVIfpar_2018and2020 <- lmer(mean_rendvi ~ fpar + (1|Replicate), data = traits_fpar_2018and2020)
+summary(lmeRENDVIfpar_2018and2020) #intercept: 0.47536, slope: -0.10583
+
+##Final reNDVI vs. fPAR graph:
+RENDVI_fpar_plot_final <- ggplot(traits_fpar, aes(x = fpar, y = mean_rendvi, colour = Year)) +
+      geom_point(size = 2.5) +
+      theme_classic(base_size = 20) +
+  theme(legend.position = "none") + 
+  geom_abline(slope = -0.10583,
+              intercept = 0.47536, size=1.5, color="black") +
+      geom_smooth(data = cbind(traits_fpar, pred = predict(lmeRENDVIfpar)), aes(y = pred, linetype = Year), method=lm, size = 1.5, na.rm=TRUE, se=FALSE) + # adding predicted line from mixed model  
+  scale_linetype_manual(values=c("blank", "solid", "blank", "blank")) +
+ labs(y=expression(atop("reNDVI (unitless)")),
+       x=expression("fPAR (unitless)"))  +
+  scale_fill_viridis_c() +
+  scale_y_continuous(position = "right")
+   
+
+RENDVI_fpar_plot_final
 
 ```
