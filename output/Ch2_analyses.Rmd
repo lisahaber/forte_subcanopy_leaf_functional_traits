@@ -1647,7 +1647,7 @@ lmNPPFINAL1 <- lm(log_NPP ~ mean_rendvi + disturbance_severity + Year +
 summary(lmNPPFINAL1)
 AICc(lmNPPFINAL1) #283.606
 
-cita### post hoc analysis
+### post hoc analysis
 require(emmeans)
 post_hoc_regression_rendvi_npp <- emmeans(lmNPPFINAL1, pairwise ~ mean_rendvi:disturbance_severity)
 summary(post_hoc_regression_rendvi_npp)
@@ -1724,7 +1724,7 @@ npp_rendvi_plot <- traits_npp %>%
                         breaks = c(0, 45, 65, 85),
                         labels = c("0", "45", "65", "85")) +
   guides(shape = guide_legend(override.aes = list(size = 3) ) ) +
-  theme_classic(base_size = 15) +
+  theme_classic(base_size = 20) +
   xlab("Subcanopy CWM reNDVI") +
   ylab(expression(paste("Subcanopy ANPP" [w], " (",kg," ",C," ",ha^-1," ",year^-1,")"))) +
   geom_function(fun = fun.1, show.legend = FALSE, color = "black", size = 1) +
@@ -1823,7 +1823,7 @@ can_NPP$Year <- as.factor(can_NPP$Year)
 can_NPP$Replicate <- as.factor(can_NPP$Replicate)
 
 
-NPP_all <- left_join(can_NPP, npp, by = c("Subplot", "Year"))
+NPP_all <- dplyr::left_join(can_NPP, npp, by = c("Subplot", "Year"))
 head(NPP_all)
 NPP_all <- NPP_all %>%
   dplyr::select(Subplot, Canopy_NPP, Year, log_can_NPP, Subplot_mean_Asat, disturbance_severity.y, treatment.y, Replicate.y, Subcanopy_NPP, log_NPP) %>%
@@ -1859,6 +1859,7 @@ bpx4 <- NPP_all %>%
   facet_grid(~Year) # this lets you make separate panels for each year
 
 bpx4
+
 
 # ## perform vector operation to calculate means and sd's
 # #+++++++++++++++++++++++++
